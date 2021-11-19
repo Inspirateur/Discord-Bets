@@ -1,11 +1,8 @@
+use rusqlite::{Connection, Result};
 use std::collections::HashMap;
 
-use rusqlite::{Connection, Result, Transaction, NO_PARAMS};
-use serenity::constants::OpCode;
-use tokio::runtime::Handle;
-
-struct Bets {
-    conn: Connection,
+pub struct Bets {
+    db_path: String,
 }
 
 struct AccountUpdate {
@@ -43,8 +40,8 @@ impl From<rusqlite::Error> for BetError {
 }
 
 impl Bets {
-    pub fn new() -> Result<Self, rusqlite::Error> {
-        let conn = Connection::open("bets.db")?;
+    pub fn new(db_path: &str) -> Result<Self, rusqlite::Error> {
+        let conn = Connection::open(db_path)?;
         conn.execute(
             "CREATE TABLE IF NOT EXISTS Account (
                 server_id TEXT,
@@ -85,7 +82,9 @@ impl Bets {
             )",
             [],
         )?;
-        Ok(Bets { conn: conn })
+        Ok(Bets {
+            db_path: db_path.to_string(),
+        })
     }
 
     pub fn create_account(
@@ -94,7 +93,8 @@ impl Bets {
         user: &str,
         amount: u32,
     ) -> Result<(), rusqlite::Error> {
-        self.conn.execute(
+        let conn = Connection::open(&self.db_path)?;
+        conn.execute(
             "INSERT 
             INTO Account (server_id, user_id, balance) 
             VALUES (?1, ?2, ?3)",
@@ -109,7 +109,8 @@ impl Bets {
         bet: &str,
         options: Vec<&str>,
     ) -> Result<(), rusqlite::Error> {
-        let tx = self.conn.transaction()?;
+        let mut conn = Connection::open(&self.db_path)?;
+        let tx = conn.transaction()?;
         tx.execute(
             "INSERT 
             INTO Bet (server_id, bet_id, is_open) 
@@ -127,9 +128,8 @@ impl Bets {
         tx.commit()
     }
 
-    fn bet_of_option(&mut self, server: &str, option: &str) -> Result<String, BetError> {
-        match self
-            .conn
+    fn bet_of_option(conn: &Connection, server: &str, option: &str) -> Result<String, BetError> {
+        match conn
             .prepare(
                 "SELECT bet_id 
                 FROM Option
@@ -145,9 +145,8 @@ impl Bets {
         }
     }
 
-    fn options_of_bet(&mut self, server: &str, bet: &str) -> Result<Vec<String>, BetError> {
-        Ok(self
-            .conn
+    fn options_of_bet(conn: &Connection, server: &str, bet: &str) -> Result<Vec<String>, BetError> {
+        Ok(conn
             .prepare(
                 "SELECT option_id 
                 FROM Option
@@ -159,18 +158,25 @@ impl Bets {
             .collect::<Result<Vec<_>, _>>()?)
     }
 
-    fn other_options(&mut self, server: &str, option: &str) -> Result<Vec<String>, BetError> {
-        let bet = self.bet_of_option(server, option)?;
-        Ok(self
-            .options_of_bet(server, &bet)?
+    fn other_options(
+        conn: &Connection,
+        server: &str,
+        option: &str,
+    ) -> Result<Vec<String>, BetError> {
+        let bet = Bets::bet_of_option(conn, server, option)?;
+        Ok(Bets::options_of_bet(conn, server, &bet)?
             .into_iter()
             .filter(|opt| opt != option)
             .collect())
     }
 
-    fn wager(&mut self, server: &str, option: &str, user: &str) -> Result<Option<u32>, BetError> {
-        match self
-            .conn
+    fn wager(
+        conn: &Connection,
+        server: &str,
+        option: &str,
+        user: &str,
+    ) -> Result<Option<u32>, BetError> {
+        match conn
             .prepare(
                 "SELECT amount 
                     FROM Wager
@@ -187,15 +193,14 @@ impl Bets {
     }
 
     fn other_wagers(
-        &mut self,
+        conn: &Connection,
         server: &str,
         option: &str,
         user: &str,
     ) -> Result<Vec<(String, u32)>, BetError> {
-        Ok(self
-            .other_options(server, option)?
+        Ok(Bets::other_options(conn, server, option)?
             .iter()
-            .map(|opt| match self.wager(server, opt, user) {
+            .map(|opt| match Bets::wager(conn, server, opt, user) {
                 Ok(wager_opt) => Ok((opt, wager_opt)),
                 Err(err) => Err(err),
             })
@@ -208,9 +213,12 @@ impl Bets {
             .collect::<Vec<(String, u32)>>())
     }
 
-    fn option_status(&mut self, server: &str, option: &str) -> Result<OptionStatus, BetError> {
-        let mut stmt = self
-            .conn
+    fn option_status(
+        conn: &Connection,
+        server: &str,
+        option: &str,
+    ) -> Result<OptionStatus, BetError> {
+        let mut stmt = conn
             .prepare(
                 "SELECT user_id, amount
                 FROM Wager
@@ -228,17 +236,20 @@ impl Bets {
         })
     }
 
-    fn options_statuses(&mut self, server: &str, bet: &str) -> Result<Vec<OptionStatus>, BetError> {
-        let options = self.options_of_bet(server, bet)?;
+    fn options_statuses(
+        conn: &Connection,
+        server: &str,
+        bet: &str,
+    ) -> Result<Vec<OptionStatus>, BetError> {
+        let options = Bets::options_of_bet(conn, server, bet)?;
         options
             .into_iter()
-            .map(|opt| self.option_status(server, &opt))
+            .map(|opt| Bets::option_status(conn, server, &opt))
             .collect::<Result<Vec<_>, _>>()
     }
 
-    fn is_bet_open(&mut self, server: &str, bet: &str) -> Result<bool, BetError> {
-        match self
-            .conn
+    fn is_bet_open(conn: &Connection, server: &str, bet: &str) -> Result<bool, BetError> {
+        match conn
             .prepare(
                 "SELECT is_open 
                 FROM Bet
@@ -261,25 +272,26 @@ impl Bets {
         user: &str,
         fraction: f32,
     ) -> Result<(AccountUpdate, Vec<OptionStatus>), BetError> {
+        let mut conn = Connection::open(&self.db_path)?;
         // check if the bet is open
-        let bet = self.bet_of_option(server, option)?;
-        if !self.is_bet_open(server, &bet)? {
+        let bet = Bets::bet_of_option(&conn, server, option)?;
+        if !Bets::is_bet_open(&conn, server, &bet)? {
             return Err(BetError::BetLocked);
         }
         // check if the user has not already bet on other options of the same bet
-        let other_wagers = self.other_wagers(server, option, user)?;
+        let other_wagers = Bets::other_wagers(&conn, server, option, user)?;
         if other_wagers.len() > 0 {
             return Err(BetError::MultiOpt(other_wagers));
         }
         // compute the amount to bet
         assert!(0. <= fraction && fraction <= 1.);
-        let balance = self.balance(server, user)?;
+        let balance = Bets::balance(&conn, server, user)?;
         let amount = f32::ceil(balance as f32 * fraction) as u32;
         if amount == 0 {
             return Err(BetError::NotEnoughMoney);
         }
         // bet
-        let tx = self.conn.transaction()?;
+        let tx = conn.transaction()?;
         tx.execute(
             "UPDATE Account
             SET balance = ?1
@@ -306,14 +318,15 @@ impl Bets {
             AccountUpdate {
                 user: user.to_string(),
                 diff: -(amount as i32),
-                balance: self.balance(server, user)?,
+                balance: Bets::balance(&conn, server, user)?,
             },
-            self.options_statuses(server, &bet)?,
+            Bets::options_statuses(&conn, server, &bet)?,
         ))
     }
 
     pub fn lock_bet(&mut self, server: &str, bet: &str) -> Result<(), BetError> {
-        self.conn.execute(
+        let conn = Connection::open(&self.db_path)?;
+        conn.execute(
             "UPDATE Bet
             SET is_open = 0
             WHERE server_id = ?1 AND bet_id = ?2",
@@ -323,14 +336,15 @@ impl Bets {
     }
 
     pub fn abort_bet(&mut self, server: &str, bet: &str) -> Result<Vec<AccountUpdate>, BetError> {
-        let options_statuses = self.options_statuses(server, &bet)?;
+        let conn = Connection::open(&self.db_path)?;
+        let options_statuses = Bets::options_statuses(&conn, server, &bet)?;
         let mut account_updates = Vec::new();
         for (user, amount) in options_statuses
             .into_iter()
             .flat_map(|option_status| option_status.wagers)
         {
-            let balance = self.balance(server, &user)? + amount;
-            self.conn.execute(
+            let balance = Bets::balance(&conn, server, &user)? + amount;
+            conn.execute(
                 "UPDATE Account
                 SET balance = ?1
                 WHERE server_id = ?2 AND user_id = ?3",
@@ -342,7 +356,7 @@ impl Bets {
                 balance: balance,
             });
         }
-        self.conn.execute(
+        conn.execute(
             "DELETE FROM Bet
             WHERE server_id = ?1 AND bet_id = ?2",
             &[server, bet],
@@ -355,9 +369,10 @@ impl Bets {
         server: &str,
         winning_option: &str,
     ) -> Result<Vec<AccountUpdate>, BetError> {
+        let conn = Connection::open(&self.db_path)?;
         // retrieve the total of the bet and the normalized winning parts
-        let bet = self.bet_of_option(server, winning_option)?;
-        let options_statuses = self.options_statuses(server, &bet)?;
+        let bet = Bets::bet_of_option(&conn, server, winning_option)?;
+        let options_statuses = Bets::options_statuses(&conn, server, &bet)?;
         let mut winning_wagers: Vec<(String, f32)> = Vec::new();
         let mut to_distribute = 0;
         for option_status in options_statuses {
@@ -399,8 +414,8 @@ impl Bets {
         // update the accounts
         let mut account_updates = Vec::new();
         for (user, gain) in gains {
-            let balance = self.balance(server, user)? + gain;
-            self.conn.execute(
+            let balance = Bets::balance(&conn, server, user)? + gain;
+            conn.execute(
                 "UPDATE Account
                 SET balance = ?1
                 WHERE server_id = ?2 AND user_id = ?3",
@@ -413,7 +428,7 @@ impl Bets {
             });
         }
         // delete the bet
-        self.conn.execute(
+        conn.execute(
             "DELETE FROM Bet
             WHERE server_id = ?1 AND bet_id = ?2",
             &[server, &bet],
@@ -421,9 +436,8 @@ impl Bets {
         Ok(account_updates)
     }
 
-    fn balance(&mut self, server: &str, user: &str) -> Result<u32, BetError> {
-        match self
-            .conn
+    fn balance(conn: &Connection, server: &str, user: &str) -> Result<u32, BetError> {
+        match conn
             .prepare(
                 "SELECT balance 
                     FROM Account
@@ -440,10 +454,10 @@ impl Bets {
     }
 
     pub fn accounts(&mut self, server: &str) -> Result<Vec<AccountStatus>, BetError> {
+        let conn = Connection::open(&self.db_path)?;
         // Map <user, balance>
         let mut accounts = HashMap::new();
-        let mut stmt = self
-            .conn
+        let mut stmt = conn
             .prepare(
                 "SELECT user_id, balance 
                     FROM Account
@@ -456,8 +470,7 @@ impl Bets {
             accounts.insert(row.get::<usize, String>(0)?, row.get::<usize, u32>(1)?);
         }
         // Map <user, total wagered>
-        let mut stmt = self
-            .conn
+        let mut stmt = conn
             .prepare(
                 "SELECT user_id, amount 
                     FROM Wager
@@ -493,7 +506,7 @@ mod tests {
 
     #[test]
     fn create_db() {
-        match Bets::new() {
+        match Bets::new("bets.db") {
             Ok(mut bets) => {
                 if let Err(why) = bets.create_account("server", "Teo", 10) {
                     println!("{}", why);
