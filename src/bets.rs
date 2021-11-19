@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use rusqlite::{Connection, Result, Transaction, NO_PARAMS};
 use serenity::constants::OpCode;
+use tokio::runtime::Handle;
 
 struct Bets {
     conn: Connection,
@@ -45,42 +46,42 @@ impl Bets {
     pub fn new() -> Result<Self, rusqlite::Error> {
         let conn = Connection::open("bets.db")?;
         conn.execute(
-            "create table if not exists Account (
-                server_id text,
-                user_id text,
-                balance integer not null,
-                primary key(server_id, user_id)
+            "CREATE TABLE IF NOT EXISTS Account (
+                server_id TEXT,
+                user_id TEXT,
+                balance INTEGER NOT NULL,
+                PRIMARY KEY(server_id, user_id)
             )",
             [],
         )?;
         conn.execute(
-            "create table if not exists Bet (
-                server_id text,
-                bet_id text,
-                is_open integer not null,
-                primary key(server_id, bet_id)
+            "CREATE TABLE IF NOT EXISTS Bet (
+                server_id TEXT,
+                bet_id TEXT,
+                is_open INTEGER NOT NULL,
+                PRIMARY KEY(server_id, bet_id)
             )",
             [],
         )?;
         conn.execute(
-            "create table if not exists Option (
-                server_id text,
-                option_id text,
-                bet_id text,
-                foreign key(server_id, bet_id) references Bet(server_id, bet_id),
-                primary key(server_id, option_id)
+            "CREATE TABLE IF NOT EXISTS Option (
+                server_id TEXT,
+                option_id TEXT,
+                bet_id TEXT,
+                FOREIGN KEY(server_id, bet_id) REFERENCES Bet(server_id, bet_id) ON DELETE CASCADE,
+                PRIMARY KEY(server_id, option_id)
             )",
             [],
         )?;
         conn.execute(
-            "create table if not exists Wager (
-                server_id text,
-                option_id text,
-                user_id text,
-                amount integer not null,
-                foreign key(server_id, option_id) references Option(server_id, option_id),
-                foreign key(server_id, user_id) references Account(server_id, user_id),
-                primary key(server_id, option_id, user_id)
+            "CREATE TABLE IF NOT EXISTS Wager (
+                server_id TEXT,
+                option_id TEXT,
+                user_id TEXT,
+                amount INTEGER NOT NULL,
+                FOREIGN KEY(server_id, option_id) REFERENCES Option(server_id, option_id) ON DELETE CASCADE,
+                FOREIGN KEY(server_id, user_id) REFERENCES Account(server_id, user_id) ON DELETE CASCADE,
+                PRIMARY KEY(server_id, option_id, user_id)
             )",
             [],
         )?;
@@ -94,9 +95,9 @@ impl Bets {
         amount: u32,
     ) -> Result<(), rusqlite::Error> {
         self.conn.execute(
-            "insert 
-            into Account (server_id, user_id, balance) 
-            values (?1, ?2, ?3)",
+            "INSERT 
+            INTO Account (server_id, user_id, balance) 
+            VALUES (?1, ?2, ?3)",
             &[server, user, &format!("{}", amount)],
         )?;
         Ok(())
@@ -110,16 +111,16 @@ impl Bets {
     ) -> Result<(), rusqlite::Error> {
         let tx = self.conn.transaction()?;
         tx.execute(
-            "insert 
-            into Bet (server_id, bet_id, is_open) 
-            values (?1, ?2, ?3)",
+            "INSERT 
+            INTO Bet (server_id, bet_id, is_open) 
+            VALUES (?1, ?2, ?3)",
             &[server, bet, "1"],
         )?;
         for option in options {
             tx.execute(
-                "insert 
-                into Option (server_id, option_id, bet_id) 
-                values (?1, ?2, ?3)",
+                "INSERT 
+                INTO Option (server_id, option_id, bet_id) 
+                VALUES (?1, ?2, ?3)",
                 &[server, option, bet],
             )?;
         }
@@ -130,9 +131,9 @@ impl Bets {
         match self
             .conn
             .prepare(
-                "select bet_id 
-                from Option
-                where server_id=?1 and option_id=?2
+                "SELECT bet_id 
+                FROM Option
+                WHERE server_id = ?1 AND option_id = ?2
                 ",
             )
             .unwrap()
@@ -148,9 +149,9 @@ impl Bets {
         Ok(self
             .conn
             .prepare(
-                "select option_id 
-                from Option
-                where server_id=?1 and bet_id=?2
+                "SELECT option_id 
+                FROM Option
+                WHERE server_id = ?1 AND bet_id = ?2
                 ",
             )
             .unwrap()
@@ -171,9 +172,9 @@ impl Bets {
         match self
             .conn
             .prepare(
-                "select amount 
-                    from Wager
-                    where server_id=?1 and option_id=?2 and user_id=?3
+                "SELECT amount 
+                    FROM Wager
+                    WHERE server_id = ?1 AND option_id = ?2 AND user_id = ?3
                     ",
             )
             .unwrap()
@@ -211,9 +212,9 @@ impl Bets {
         let mut stmt = self
             .conn
             .prepare(
-                "select option_id, amount
-        from Wager
-        where server_id = ?1 and option_id = ?2",
+                "SELECT user_id, amount
+                FROM Wager
+                WHERE server_id = ?1 AND option_id = ?2",
             )
             .unwrap();
         let mut rows = stmt.query(&[server, option])?;
@@ -239,9 +240,9 @@ impl Bets {
         match self
             .conn
             .prepare(
-                "select is_open 
-                from Bet
-                where server_id=?1 and bet_id=?2
+                "SELECT is_open 
+                FROM Bet
+                WHERE server_id = ?1 AND bet_id = ?2
                 ",
             )
             .unwrap()
@@ -272,7 +273,7 @@ impl Bets {
         }
         // compute the amount to bet
         assert!(0. <= fraction && fraction <= 1.);
-        let balance = self.account(server, user)?;
+        let balance = self.balance(server, user)?;
         let amount = f32::ceil(balance as f32 * fraction) as u32;
         if amount == 0 {
             return Err(BetError::NotEnoughMoney);
@@ -280,22 +281,22 @@ impl Bets {
         // bet
         let tx = self.conn.transaction()?;
         tx.execute(
-            "update Account
-            set balance = ?1
-            where server_id = ?2 and user_id = ?3
+            "UPDATE Account
+            SET balance = ?1
+            WHERE server_id = ?2 AND user_id = ?3
             ",
             &[&format!("{}", balance - amount), server, user],
         )?;
         tx.execute(
-            "insert or ignore
-            into Wager (server_id, option_id, user_id, amount)
-            values (?1, ?2, ?3, ?4)",
+            "INSERT or ignore
+            INTO Wager (server_id, option_id, user_id, amount)
+            VALUES (?1, ?2, ?3, ?4)",
             &[server, option, user, "0"],
         )?;
         tx.execute(
-            "update Wager
-            set amount = amount + ?1
-            where server_id = ?2 and option_id = ?3 and user_id = ?4
+            "UPDATE Wager
+            SET amount = amount + ?1
+            WHERE server_id = ?2 AND option_id = ?3 AND user_id = ?4
             ",
             &[&format!("{}", amount), server, option, user],
         )?;
@@ -305,7 +306,7 @@ impl Bets {
             AccountUpdate {
                 user: user.to_string(),
                 diff: -(amount as i32),
-                balance: self.account(server, user)?,
+                balance: self.balance(server, user)?,
             },
             self.options_statuses(server, &bet)?,
         ))
@@ -313,16 +314,40 @@ impl Bets {
 
     pub fn lock_bet(&mut self, server: &str, bet: &str) -> Result<(), BetError> {
         self.conn.execute(
-            "update Bet
-            set is_open = 0
-            where server_id = ?1 and bet_id = ?2",
+            "UPDATE Bet
+            SET is_open = 0
+            WHERE server_id = ?1 AND bet_id = ?2",
             &[server, bet],
         )?;
         Ok(())
     }
 
     pub fn abort_bet(&mut self, server: &str, bet: &str) -> Result<Vec<AccountUpdate>, BetError> {
-        todo!()
+        let options_statuses = self.options_statuses(server, &bet)?;
+        let mut account_updates = Vec::new();
+        for (user, amount) in options_statuses
+            .into_iter()
+            .flat_map(|option_status| option_status.wagers)
+        {
+            let balance = self.balance(server, &user)? + amount;
+            self.conn.execute(
+                "UPDATE Account
+                SET balance = ?1
+                WHERE server_id = ?2 AND user_id = ?3",
+                &[&format!("{}", balance), server, &user],
+            )?;
+            account_updates.push(AccountUpdate {
+                user: user,
+                diff: amount as i32,
+                balance: balance,
+            });
+        }
+        self.conn.execute(
+            "DELETE FROM Bet
+            WHERE server_id = ?1 AND bet_id = ?2",
+            &[server, bet],
+        )?;
+        Ok(account_updates)
     }
 
     pub fn close_bet(
@@ -330,6 +355,7 @@ impl Bets {
         server: &str,
         winning_option: &str,
     ) -> Result<Vec<AccountUpdate>, BetError> {
+        // retrieve the total of the bet and the normalized winning parts
         let bet = self.bet_of_option(server, winning_option)?;
         let options_statuses = self.options_statuses(server, &bet)?;
         let mut winning_wagers: Vec<(String, f32)> = Vec::new();
@@ -352,12 +378,14 @@ impl Bets {
             .into_iter()
             .map(|(user, part)| (user, part * to_distribute as f32))
             .collect();
+        // distribute the gains by dropping the decimal part first
         let mut gains: Vec<(&str, u32)> = winning_wagers
             .iter()
             .map(|(user, gain)| (user.as_str(), *gain as u32))
             .collect();
         to_distribute -= gains.iter().fold(0, |init, (_, gain)| init + *gain);
         assert!(to_distribute <= gains.len() as u32);
+        // distribute the remaining coins to those with the bigger decimal parts
         let winner_parts: HashMap<String, f32> = winning_wagers.clone().into_iter().collect();
         gains.sort_unstable_by(|(user1, gain1), (user2, gain2)| {
             (winner_parts[*user1] - winner_parts[*user1].floor())
@@ -368,13 +396,14 @@ impl Bets {
         for i in 0..to_distribute as usize {
             gains[i].1 += 1;
         }
+        // update the accounts
         let mut account_updates = Vec::new();
         for (user, gain) in gains {
-            let balance = self.account(server, user)? + gain;
+            let balance = self.balance(server, user)? + gain;
             self.conn.execute(
-                "update Account
-                set balance = ?1
-                where server_id = ?2 and user_id = ?3",
+                "UPDATE Account
+                SET balance = ?1
+                WHERE server_id = ?2 AND user_id = ?3",
                 &[&format!("{}", balance), server, user],
             )?;
             account_updates.push(AccountUpdate {
@@ -383,16 +412,22 @@ impl Bets {
                 balance: balance,
             });
         }
+        // delete the bet
+        self.conn.execute(
+            "DELETE FROM Bet
+            WHERE server_id = ?1 AND bet_id = ?2",
+            &[server, &bet],
+        )?;
         Ok(account_updates)
     }
 
-    fn account(&mut self, server: &str, user: &str) -> Result<u32, BetError> {
+    fn balance(&mut self, server: &str, user: &str) -> Result<u32, BetError> {
         match self
             .conn
             .prepare(
-                "select balance 
-                    from Account
-                    where server_id=?1 and user_id=?2
+                "SELECT balance 
+                    FROM Account
+                    WHERE server_id = ?1 AND user_id = ?2
                     ",
             )
             .unwrap()
@@ -404,8 +439,51 @@ impl Bets {
         }
     }
 
-    pub fn accounts(&mut self, server: &str) -> Vec<AccountStatus> {
-        todo!()
+    pub fn accounts(&mut self, server: &str) -> Result<Vec<AccountStatus>, BetError> {
+        // Map <user, balance>
+        let mut accounts = HashMap::new();
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT user_id, balance 
+                    FROM Account
+                    WHERE server_id = ?1
+                    ",
+            )
+            .unwrap();
+        let mut rows = stmt.query(&[server])?;
+        while let Some(row) = rows.next()? {
+            accounts.insert(row.get::<usize, String>(0)?, row.get::<usize, u32>(1)?);
+        }
+        // Map <user, total wagered>
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT user_id, amount 
+                    FROM Wager
+                    WHERE server_id = ?1
+                    ",
+            )
+            .unwrap();
+        let mut rows = stmt.query(&[server])?;
+        let mut wagers = HashMap::new();
+        while let Some(row) = rows.next()? {
+            let user = row.get::<usize, String>(0)?;
+            let amount = match wagers.get(&user) {
+                Some(amount) => *amount,
+                None => 0,
+            };
+            wagers.insert(user, amount + row.get::<usize, u32>(1)?);
+        }
+        // return the account statuses
+        Ok(accounts
+            .into_iter()
+            .map(|(user, balance)| AccountStatus {
+                user: user.clone(),
+                balance: balance,
+                in_bet: wagers[&user],
+            })
+            .collect())
     }
 }
 
@@ -417,16 +495,23 @@ mod tests {
     fn create_db() {
         match Bets::new() {
             Ok(mut bets) => {
-                if let Err(why) = bets.create_account("server", "user", 10) {
+                if let Err(why) = bets.create_account("server", "Teo", 10) {
                     println!("{}", why);
                 }
-
+                if let Err(why) = bets.create_account("server", "Roux", 10) {
+                    println!("{}", why);
+                }
                 if let Err(why) = bets.create_bet("server", "bet", vec!["option1", "option2"]) {
                     println!("{}", why);
                 }
-
-                if let Err(why) = bets.bet_on("server", "option2", "user", 0.5) {
+                if let Err(why) = bets.bet_on("server", "option2", "Teo", 0.5) {
                     println!("{:?}", why);
+                }
+                if let Err(why) = bets.bet_on("server", "option1", "Roux", 0.7) {
+                    println!("{:?}", why);
+                }
+                if let Err(why) = bets.abort_bet("server", "bet") {
+                    println!("{:?}", why)
                 }
             }
             Err(why) => println!("{}", why),
