@@ -1,8 +1,10 @@
 use rusqlite::{Connection, Result};
 use serde_json::{map::Map, value::Value};
 use serenity::{
-    http::Http,
+    client::Context,
+    http::{CacheHttp, Http},
     model::{
+        channel::Channel,
         id::{ChannelId, GuildId, MessageId, UserId},
         misc::ChannelIdParseError,
     },
@@ -55,6 +57,17 @@ impl From<ChannelIdParseError> for FrontError {
     }
 }
 
+pub async fn is_readable(ctx: &Context, channel_id: ChannelId) -> bool {
+    if let Ok(Channel::Guild(channel)) = channel_id.to_channel(&ctx.http).await {
+        if let Ok(me) = ctx.http.get_current_user().await {
+            if let Ok(perms) = channel.permissions_for_user(&ctx.cache, me.id).await {
+                return perms.read_messages();
+            }
+        }
+    }
+    false
+}
+
 impl Front {
     pub fn new(db_path: &str) -> Result<Self, FrontError> {
         let conn = Connection::open(db_path)?;
@@ -104,7 +117,7 @@ impl Front {
 
     pub async fn create_account_thread(
         &self,
-        http: &Http,
+        ctx: &Context,
         server: GuildId,
         channel: ChannelId,
         user: UserId,
@@ -114,7 +127,7 @@ impl Front {
             Ok(thread_str) => {
                 // If the thread is valid we stop here
                 if let Ok(thread) = ChannelId::from_str(&thread_str) {
-                    if let Ok(_) = thread.say(http, "This is your account thread.").await {
+                    if is_readable(ctx, thread).await {
                         return Err(FrontError::AlreadyExists);
                     }
                 }
@@ -125,14 +138,18 @@ impl Front {
                 return Err(err);
             }
         }
-        let parent_msg = channel.say(http, "Creating the Account Thread").await?;
+        let parent_msg = channel
+            .say(&ctx.http, "Creating the Account Thread")
+            .await?;
         let mut json_map = Map::new();
         json_map.insert("name".to_string(), Value::String("XXX".to_string()));
-        let thread = http
+        let thread = ctx
+            .http
             .create_public_thread(channel.into(), parent_msg.id.into(), &json_map)
             .await?;
-        if let Err(_) = parent_msg.delete(http).await {};
-        http.add_thread_channel_member(thread.id.into(), user.into())
+        if let Err(_) = parent_msg.delete(&ctx.http).await {};
+        ctx.http
+            .add_thread_channel_member(thread.id.into(), user.into())
             .await?;
         self.set(
             &format!("{}", server),

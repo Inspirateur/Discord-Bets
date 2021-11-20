@@ -16,6 +16,7 @@ serenity = { version = "*", default-features = false, features = [
 	"rustls_backend",
 	"model",
 	"unstable_discord_api",
+	"cache",
 ] }
 serde_json = "*"
 tokio = { version = "*", features = ["macros", "rt-multi-thread"] }

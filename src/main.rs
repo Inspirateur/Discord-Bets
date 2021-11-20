@@ -1,6 +1,7 @@
 mod bets;
 mod front;
 use bets::{BetError, Bets};
+use front::is_readable;
 use serenity::{
     async_trait,
     http::Http,
@@ -21,8 +22,6 @@ use shellwords::{split, MismatchedQuotes};
 use std::env;
 
 use crate::front::{Front, FrontError};
-
-struct HandlerError;
 
 struct Handler {
     bets: Bets,
@@ -82,7 +81,7 @@ impl Handler {
             if let Ok(balance) = self.bets.balance(&guild, &user) {
                 match self
                     .front
-                    .create_account_thread(&ctx.http, guild_id, command.channel_id, command.user.id)
+                    .create_account_thread(&ctx, guild_id, command.channel_id, command.user.id)
                     .await
                 {
                     Ok(()) => {
@@ -184,13 +183,23 @@ impl Handler {
 #[async_trait]
 impl EventHandler for Handler {
     async fn interaction_create(&self, ctx: Context, interaction: Interaction) {
+        // only answer if the bot has access to the channel
         if let Interaction::ApplicationCommand(command) = interaction {
-            match command.data.name.as_str() {
-                "make_account" => self.make_account(ctx, command).await,
-                "bet" => self.bet(ctx, command).await,
-                "leaderboard" => self.leadeboard(ctx, command).await,
-                _ => {}
-            };
+            if is_readable(&ctx, command.channel_id).await {
+                match command.data.name.as_str() {
+                    "make_account" => self.make_account(ctx, command).await,
+                    "bet" => self.bet(ctx, command).await,
+                    "leaderboard" => self.leadeboard(ctx, command).await,
+                    _ => {}
+                };
+            } else {
+                response(
+                    &ctx.http,
+                    &command,
+                    "Sorry, I only answer to commands in the channels that I can read.",
+                )
+                .await;
+            }
         }
     }
 
