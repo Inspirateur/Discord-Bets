@@ -1,7 +1,9 @@
 mod bets;
-use bets::Bets;
+mod front;
+use bets::{BetError, Bets};
 use serenity::{
     async_trait,
+    http::Http,
     model::{
         gateway::Ready,
         id::GuildId,
@@ -18,30 +20,115 @@ use serenity::{
 use shellwords::{split, MismatchedQuotes};
 use std::env;
 
+use crate::front::{Front, FrontError};
+
+struct HandlerError;
+
 struct Handler {
     bets: Bets,
+    front: Front,
+}
+
+async fn response<D>(http: &Http, command: &ApplicationCommandInteraction, msg: D)
+where
+    D: ToString,
+{
+    if let Err(why) = command
+        .create_interaction_response(http, |response| {
+            response
+                .kind(InteractionResponseType::ChannelMessageWithSource)
+                .interaction_response_data(|message| message.content(msg))
+        })
+        .await
+    {
+        println!("{}", why);
+    };
 }
 
 impl Handler {
     pub fn new() -> Self {
         Handler {
             bets: Bets::new("bets.db").unwrap(),
+            front: Front::new("front.db").unwrap(),
         }
     }
 
     pub async fn make_account(&self, ctx: Context, command: ApplicationCommandInteraction) {
-        if let Err(why) = command
-            .create_interaction_response(&ctx.http, |response| {
-                response
-                    .kind(InteractionResponseType::ChannelMessageWithSource)
-                    .interaction_response_data(|message| {
-                        message.content(format!("We're in {}", command.channel_id))
-                    })
-            })
-            .await
-        {
-            println!("{}", why);
-        };
+        // we only do something if the command was used in a server
+        if let Some(guild_id) = command.guild_id {
+            let guild = format!("{}", guild_id);
+            let user = format!("{}", command.user.id);
+            let mut new_acc = false;
+            let mut resp: Vec<String> = Vec::new();
+            // try to create the account
+            match self.bets.create_account(&guild, &user, 10) {
+                Err(BetError::AlreadyExists) => {
+                    resp.push("You already have an account.".to_string())
+                }
+                Err(BetError::InternalError(why)) => {
+                    resp.push(format!(
+                        "Internal Error while creating the Account ```{}```",
+                        why
+                    ));
+                    return;
+                }
+                Err(_) => {}
+                Ok(_) => {
+                    new_acc = true;
+                    resp.push("Your account was successfully created.".to_string());
+                }
+            }
+            // try to create the account thread
+            if let Ok(balance) = self.bets.balance(&guild, &user) {
+                match self
+                    .front
+                    .create_account_thread(&ctx.http, guild_id, command.channel_id, command.user.id)
+                    .await
+                {
+                    Ok(()) => {
+                        resp.push("Your account thread was successfully created.".to_string());
+                        let msg = if new_acc {
+                            format!(
+                                "Your account has been created with a starting balance of {}",
+                                balance
+                            )
+                        } else {
+                            String::from("It seems your previous Account Thread is gone, this is the new one.")
+                        };
+                        match self.front.update_account_thread(
+                            &ctx.http,
+                            guild_id,
+                            command.user.id,
+                            balance,
+                            msg,
+                        )
+                        .await
+                        {
+                            Err(FrontError::LackPermission(perms)) => {
+                                resp.push(format!("Cannot update the Account Thread because I am lacking the permissions: {}", perms))
+                            }
+                            Err(FrontError::InternalError(why)) => {
+                                resp.push(format!("Internal error while updating Account Thread ```{}```", why))
+                            }
+                            _ => {}
+                        }
+                    }
+                    Err(FrontError::LackPermission(perms)) => resp.push(format!(
+                        "Cannot create the Account Thread because I am lacking the permissions: {}",
+                        perms
+                    )),
+                    Err(FrontError::AlreadyExists) => {
+                        resp.push("You already have an account thread.".to_string())
+                    }
+                    Err(FrontError::InternalError(why)) => resp.push(format!(
+                        "Internal error while creating the Account Thread ```{}```",
+                        why
+                    )),
+                    _ => {}
+                }
+            }
+            response(&ctx.http, &command, resp.join("\n")).await;
+        }
     }
 
     fn bet_parse(
@@ -80,32 +167,17 @@ impl Handler {
 
     pub async fn bet(&self, ctx: Context, command: ApplicationCommandInteraction) {
         if let Ok((desc, outcomes)) = Handler::bet_parse(&command) {
-            if let Err(why) = command
-                .create_interaction_response(&ctx.http, |response| {
-                    response
-                        .kind(InteractionResponseType::ChannelMessageWithSource)
-                        .interaction_response_data(|message| {
-                            message.content(format!("{}\n{}", desc, outcomes.join("\n")))
-                        })
-                })
-                .await
-            {
-                println!("{}", why);
-            };
+            response(
+                &ctx.http,
+                &command,
+                format!("{}\n{}", desc, outcomes.join("\n")),
+            )
+            .await;
         }
     }
 
     pub async fn leadeboard(&self, ctx: Context, command: ApplicationCommandInteraction) {
-        if let Err(why) = command
-            .create_interaction_response(&ctx.http, |response| {
-                response
-                    .kind(InteractionResponseType::ChannelMessageWithSource)
-                    .interaction_response_data(|message| message.content("uuuh".to_string()))
-            })
-            .await
-        {
-            println!("{}", why);
-        };
+        response(&ctx.http, &command, "nomegalul").await;
     }
 }
 
@@ -125,53 +197,53 @@ impl EventHandler for Handler {
     async fn ready(&self, ctx: Context, ready: Ready) {
         println!("{} is connected!", ready.user.name);
 
-        let guild_id = GuildId(171292924846276609);
-
-        let commands = GuildId::set_application_commands(&guild_id, &ctx.http, |commands| {
-            commands
-                .create_application_command(|command| {
-                    command.name("make_account").description(
-                        "Create an account and displays it as a thread under this channel.",
-                    )
-                })
-                .create_application_command(|command| {
-                    command
-                        .name("bet")
-                        .description("Create a bet.")
-                        .create_option(|option| {
-                            option
-                                .name("desc")
-                                .description("The description of the bet")
-                                .kind(ApplicationCommandOptionType::String)
-                                .required(true)
+        for guild in ready.guilds {
+            println!("Registering slash commands for Guild {}", guild.id());
+            if let Err(why) =
+                GuildId::set_application_commands(&guild.id(), &ctx.http, |commands| {
+                    commands
+                        .create_application_command(|command| {
+                            command.name("make_account").description(
+                                "Create an account and displays it as a thread under this channel.",
+                            )
                         })
-                        .create_option(|option| {
-                            option
-                                .name("options")
-                                .description("The possible outcomes of the bet")
-                                .kind(ApplicationCommandOptionType::String)
-                                .required(true)
+                        .create_application_command(|command| {
+                            command
+                                .name("bet")
+                                .description("Create a bet.")
+                                .create_option(|option| {
+                                    option
+                                        .name("desc")
+                                        .description("The description of the bet")
+                                        .kind(ApplicationCommandOptionType::String)
+                                        .required(true)
+                                })
+                                .create_option(|option| {
+                                    option
+                                        .name("options")
+                                        .description("The possible outcomes of the bet")
+                                        .kind(ApplicationCommandOptionType::String)
+                                        .required(true)
+                                })
+                        })
+                        .create_application_command(|command| {
+                            command
+                                .name("leaderboard")
+                                .description("Displays the leadeboard.")
+                                .create_option(|option| {
+                                    option
+                                        .name("permanent")
+                                        .description("To make a ever updating leaderboard")
+                                        .kind(ApplicationCommandOptionType::Boolean)
+                                        .required(false)
+                                })
                         })
                 })
-                .create_application_command(|command| {
-                    command
-                        .name("leaderboard")
-                        .description("Displays the leadeboard.")
-                        .create_option(|option| {
-                            option
-                                .name("permanent")
-                                .description("To make a ever updating leaderboard")
-                                .kind(ApplicationCommandOptionType::Boolean)
-                                .required(false)
-                        })
-                })
-        })
-        .await;
-
-        println!(
-            "I now have the following guild slash commands: {:#?}",
-            commands
-        );
+                .await
+            {
+                println!("{}", why);
+            };
+        }
     }
 }
 

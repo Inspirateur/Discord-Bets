@@ -17,5 +17,6 @@ serenity = { version = "*", default-features = false, features = [
 	"model",
 	"unstable_discord_api",
 ] }
+serde_json = "*"
 tokio = { version = "*", features = ["macros", "rt-multi-thread"] }
 shellwords = "*"

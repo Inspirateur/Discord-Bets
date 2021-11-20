@@ -78,6 +78,7 @@ name = "betting_bot"
 version = "0.1.0"
 dependencies = [
  "rusqlite",
+ "serde_json",
  "serenity",
  "shellwords",
  "tokio",
