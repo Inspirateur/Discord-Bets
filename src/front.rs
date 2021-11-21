@@ -1,3 +1,6 @@
+use crate::bets::{BetStatus, OptionStatus};
+use crate::utils::lrm;
+use itertools;
 use rusqlite::{Connection, Result};
 use serde_json::{map::Map, value::Value};
 use serenity::{
@@ -10,13 +13,30 @@ use serenity::{
     },
     model::{ModelError, Permissions},
 };
-use std::{fmt::Display, str::FromStr};
+use std::{cmp::min, fmt::Display, str::FromStr};
 
-use crate::bets::{BetStatus, OptionStatus};
+const NUM_SUFFIX: [&str; 5] = ["", "K", "M", "B", "T"];
 
-fn number_display(balance: u32) -> String {
-    // TODO: implement clever display with shorteners such as k, m, b
-    format!("{}", balance)
+fn number_display<R>(x: R) -> String
+where
+    R: Into<f64>,
+{
+    let a: f64 = x.into();
+    if !a.is_finite() {
+        return format!("{}", a);
+    }
+    let digit_len = (a as u32).to_string().len();
+    let suffix_id = min(
+        NUM_SUFFIX.len(),
+        (digit_len as f32 / 3 as f32).ceil() as usize - 1,
+    );
+    let a = a / 10.0_f64.powi(3 * suffix_id as i32);
+    let repr = if digit_len % 3 == 1 {
+        format!("{:.1}", a).trim_end_matches(".0").to_string()
+    } else {
+        format!("{:.0}", a)
+    };
+    repr + NUM_SUFFIX[suffix_id]
 }
 
 pub async fn is_readable(ctx: &Context, channel_id: ChannelId) -> bool {
@@ -46,8 +66,46 @@ pub fn bet_stub(options_desc: &Vec<String>) -> BetStatus {
     }
 }
 
+fn option_display(desc: &str, percent: u32, odd: f32, sum: u32, people: u32) -> String {
+    format!(
+        "> {}\n`{}%  |  1:{} 🏆   {} 🪙   {} 👥`",
+        desc,
+        percent,
+        number_display(odd),
+        number_display(sum),
+        number_display(people)
+    )
+}
+
 pub fn options_display(bet_status: &BetStatus) -> Vec<String> {
-    todo!()
+    let sums: Vec<u32> = bet_status
+        .options
+        .iter()
+        .map(|option| {
+            option
+                .wagers
+                .iter()
+                .fold(0, |init, (_, amount)| init + amount)
+        })
+        .collect();
+
+    let total = sums.iter().fold(0, |init, sum| init + *sum);
+
+    let percents = lrm(100, &sums);
+
+    let odds: Vec<f32> = sums.iter().map(|sum| total as f32 / *sum as f32).collect();
+
+    let peoples: Vec<usize> = bet_status
+        .options
+        .iter()
+        .map(|option| option.wagers.len())
+        .collect();
+
+    itertools::izip!(&bet_status.options, percents, odds, sums, peoples)
+        .map(|(option, percent, odd, sum, people)| {
+            option_display(&option.desc, percent, odd, sum, people as u32)
+        })
+        .collect()
 }
 
 pub async fn update_options(ctx: &Context, channel_id: ChannelId, bet_status: &BetStatus) {

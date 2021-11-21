@@ -10,6 +10,7 @@ version = "*"
 features = ["bundled"]
 
 [dependencies]
+itertools = "*"
 serenity = { version = "*", default-features = false, features = [
 	"client",
 	"gateway",

@@ -1,6 +1,7 @@
 mod bets;
 mod front;
 mod handler;
+mod utils;
 use crate::front::is_readable;
 use handler::{response, Handler};
 use serenity::{

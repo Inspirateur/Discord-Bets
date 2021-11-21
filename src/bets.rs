@@ -1,4 +1,5 @@
-use rusqlite::{Connection, ErrorCode, Result};
+use crate::utils;
+use rusqlite::{Connection, Result};
 use std::collections::HashMap;
 
 pub struct Bets {
@@ -398,50 +399,30 @@ impl Bets {
         winning_option: &str,
     ) -> Result<Vec<AccountUpdate>, BetError> {
         let conn = Connection::open(&self.db_path)?;
-        // retrieve the total of the bet and the normalized winning parts
+        // retrieve the total of the bet and the winning parts
         let bet = Bets::bet_of_option(&conn, server, winning_option)?;
         let options_statuses = Bets::options_statuses(&conn, server, &bet)?;
-        let mut winning_wagers: Vec<(String, f32)> = Vec::new();
-        let mut to_distribute = 0;
+        let mut winners: Vec<String> = Vec::new();
+        let mut wins: Vec<u32> = Vec::new();
+        let mut total = 0;
         for option_status in options_statuses {
             let option_sum = option_status
                 .wagers
                 .iter()
                 .fold(0, |init, wager| init + wager.1);
-            to_distribute += option_sum;
+            total += option_sum;
             if option_status.option == winning_option {
-                winning_wagers = option_status
-                    .wagers
-                    .into_iter()
-                    .map(|(user, wager)| (user, wager as f32 / option_sum as f32))
-                    .collect();
+                for (winner, win) in option_status.wagers {
+                    winners.push(winner);
+                    wins.push(win);
+                }
             }
         }
-        winning_wagers = winning_wagers
-            .into_iter()
-            .map(|(user, part)| (user, part * to_distribute as f32))
-            .collect();
-        // distribute the gains by dropping the decimal part first
-        let mut gains: Vec<(&str, u32)> = winning_wagers
-            .iter()
-            .map(|(user, gain)| (user.as_str(), *gain as u32))
-            .collect();
-        to_distribute -= gains.iter().fold(0, |init, (_, gain)| init + *gain);
-        assert!(to_distribute <= gains.len() as u32);
-        // distribute the remaining coins to those with the bigger decimal parts
-        let winner_parts: HashMap<String, f32> = winning_wagers.clone().into_iter().collect();
-        gains.sort_unstable_by(|(user1, gain1), (user2, gain2)| {
-            (winner_parts[*user1] - winner_parts[*user1].floor())
-                .partial_cmp(&(winner_parts[*user2] - winner_parts[*user2]))
-                .unwrap()
-        });
-        gains.reverse();
-        for i in 0..to_distribute as usize {
-            gains[i].1 += 1;
-        }
+        // compute the gains for each winners
+        let gains = utils::lrm(total, &wins);
         // update the accounts
         let mut account_updates = Vec::new();
-        for (user, gain) in gains {
+        for (user, gain) in winners.iter().zip(gains.iter()) {
             let balance = Bets::_balance(&conn, server, user)? + gain;
             conn.execute(
                 "UPDATE Account
@@ -451,7 +432,7 @@ impl Bets {
             )?;
             account_updates.push(AccountUpdate {
                 user: user.to_string(),
-                diff: gain as i32,
+                diff: *gain as i32,
                 balance: balance,
             });
         }
