@@ -12,9 +12,46 @@ use serenity::{
 };
 use std::{fmt::Display, str::FromStr};
 
-fn balance_display(balance: u32) -> String {
+use crate::bets::{BetStatus, OptionStatus};
+
+fn number_display(balance: u32) -> String {
     // TODO: implement clever display with shorteners such as k, m, b
     format!("{}", balance)
+}
+
+pub async fn is_readable(ctx: &Context, channel_id: ChannelId) -> bool {
+    if let Ok(Channel::Guild(channel)) = channel_id.to_channel(&ctx.http).await {
+        if let Ok(me) = ctx.http.get_current_user().await {
+            if let Ok(perms) = channel.permissions_for_user(&ctx.cache, me.id).await {
+                return perms.read_messages();
+            }
+        }
+    }
+    false
+}
+
+fn option_stub(option_desc: &String) -> OptionStatus {
+    OptionStatus {
+        option: String::new(),
+        desc: option_desc.clone(),
+        wagers: Vec::new(),
+    }
+}
+
+pub fn bet_stub(options_desc: &Vec<String>) -> BetStatus {
+    BetStatus {
+        bet: String::new(),
+        desc: String::new(),
+        options: options_desc.iter().map(option_stub).collect(),
+    }
+}
+
+pub fn options_display(bet_status: &BetStatus) -> Vec<String> {
+    todo!()
+}
+
+pub async fn update_options(ctx: &Context, channel_id: ChannelId, bet_status: &BetStatus) {
+    todo!()
 }
 
 pub struct Front {
@@ -54,17 +91,6 @@ impl From<ChannelIdParseError> for FrontError {
     fn from(_: ChannelIdParseError) -> Self {
         FrontError::InternalError(String::from("Invalid Account Thread id"))
     }
-}
-
-pub async fn is_readable(ctx: &Context, channel_id: ChannelId) -> bool {
-    if let Ok(Channel::Guild(channel)) = channel_id.to_channel(&ctx.http).await {
-        if let Ok(me) = ctx.http.get_current_user().await {
-            if let Ok(perms) = channel.permissions_for_user(&ctx.cache, me.id).await {
-                return perms.read_messages();
-            }
-        }
-    }
-    false
 }
 
 impl Front {
@@ -172,7 +198,7 @@ impl Front {
         let thread_str = self.get(&format!("{}", server), &format!("{}", user))?;
         let thread = ChannelId::from_str(&thread_str)?;
         thread
-            .edit(http, |edit| edit.name(balance_display(balance)))
+            .edit(http, |edit| edit.name(number_display(balance)))
             .await?;
         thread.say(http, msg).await?;
         Ok(())
