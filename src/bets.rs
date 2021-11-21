@@ -7,9 +7,9 @@ pub struct Bets {
 }
 
 pub struct AccountUpdate {
-    user: String,
-    diff: i32,
-    balance: u32,
+    pub user: String,
+    pub diff: i32,
+    pub balance: u32,
 }
 
 pub struct BetStatus {
@@ -26,9 +26,9 @@ pub struct OptionStatus {
 }
 
 pub struct AccountStatus {
-    user: String,
-    balance: u32,
-    in_bet: u32,
+    pub user: String,
+    pub balance: u32,
+    pub in_bet: u32,
 }
 
 #[derive(Debug)]
@@ -117,13 +117,13 @@ impl Bets {
         Ok(())
     }
 
-    pub fn create_bet(
+    pub fn create_bet<T: AsRef<str>>(
         &self,
         server: &str,
         bet: &str,
         bet_desc: &str,
-        options: Vec<&str>,
-        options_desc: Vec<&str>,
+        options: &[T],
+        options_desc: &[T],
     ) -> Result<(), BetError> {
         assert!(options.len() == options_desc.len());
         let mut conn = Connection::open(&self.db_path)?;
@@ -139,7 +139,7 @@ impl Bets {
                 "INSERT 
                 INTO Option (server_id, option_id, bet_id, desc) 
                 VALUES (?1, ?2, ?3, ?4)",
-                &[server, options[i], bet, options_desc[i]],
+                &[server, options[i].as_ref(), bet, options_desc[i].as_ref()],
             )?;
         }
         Ok(tx.commit()?)
@@ -530,8 +530,8 @@ mod tests {
                     "server",
                     "bet1",
                     "Est-ce que roux va dormir bientot ?",
-                    vec!["opt1", "opt2"],
-                    vec!["oui", "non"],
+                    &vec!["opt1", "opt2"],
+                    &vec!["oui", "non"],
                 ) {
                     println!("4 {:?}", why);
                 }

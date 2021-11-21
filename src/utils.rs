@@ -2,13 +2,13 @@
 // minimizing the error incurred by rounding
 // https://en.wikipedia.org/wiki/Largest_remainder_method
 pub fn lrm(total: u32, parts: &Vec<u32>) -> Vec<u32> {
-    let total = parts.iter().fold(0, |i, a| i + *a);
-    if total == 0 {
+    let norm = parts.iter().fold(0, |i, a| i + *a);
+    if norm == 0 {
         return vec![0; parts.len()];
     }
     let parts: Vec<_> = parts
         .into_iter()
-        .map(|part| *part as f32 / total as f32)
+        .map(|part| *part as f32 / norm as f32)
         .collect();
     // compute the ideal gains (real number)
     let fgains: Vec<f32> = parts.iter().map(|part| total as f32 * part).collect();

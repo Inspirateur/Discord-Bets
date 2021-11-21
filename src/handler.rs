@@ -1,7 +1,9 @@
 use crate::bets::{BetError, Bets};
-use crate::front::{bet_stub, options_display, Front, FrontError};
+use crate::front::{bet_stub, options_display, update_options, Front, FrontError};
+use itertools::Itertools;
 use serenity::{
     http::Http,
+    model::channel::Channel,
     model::interactions::{
         application_command::{
             ApplicationCommandInteraction, ApplicationCommandInteractionDataOptionValue,
@@ -12,6 +14,17 @@ use serenity::{
     prelude::*,
 };
 use shellwords::{split, MismatchedQuotes};
+const BET_OPTS: [u32; 3] = [10, 50, 100];
+const LOCK: &str = "lock";
+const ABORT: &str = "abort";
+const WIN: &str = "win";
+
+fn bet_opts_display(percent: u32) -> String {
+    match percent {
+        100 => "All in".to_string(),
+        _ => format!("{} %", percent),
+    }
+}
 
 pub struct Handler {
     bets: Bets,
@@ -175,13 +188,13 @@ impl Handler {
                                     action_row
                                         .create_button(|button| {
                                             button
-                                                .custom_id(0)
+                                                .custom_id(LOCK)
                                                 .style(ButtonStyle::Primary)
                                                 .label("Lock")
                                         })
                                         .create_button(|button| {
                                             button
-                                                .custom_id(1)
+                                                .custom_id(ABORT)
                                                 .style(ButtonStyle::Danger)
                                                 .label("Abort")
                                         })
@@ -200,25 +213,21 @@ impl Handler {
                                 .send_message(&ctx.http, |messsage| {
                                     messsage.content(outcome).components(|components| {
                                         components.create_action_row(|action_row| {
-                                            action_row
-                                                .create_button(|button| {
+                                            for (i, percent) in BET_OPTS.into_iter().enumerate() {
+                                                action_row.create_button(|button| {
                                                     button
-                                                        .custom_id(0)
+                                                        .custom_id(i)
                                                         .style(ButtonStyle::Secondary)
-                                                        .label("10 %")
-                                                })
-                                                .create_button(|button| {
-                                                    button
-                                                        .custom_id(1)
-                                                        .style(ButtonStyle::Secondary)
-                                                        .label("50 %")
-                                                })
-                                                .create_button(|button| {
-                                                    button
-                                                        .custom_id(2)
-                                                        .style(ButtonStyle::Secondary)
-                                                        .label("All In")
-                                                })
+                                                        .label(bet_opts_display(percent))
+                                                });
+                                            }
+                                            action_row.create_button(|button| {
+                                                button
+                                                    .custom_id(WIN)
+                                                    .style(ButtonStyle::Success)
+                                                    .disabled(true)
+                                                    .label("🏆")
+                                            })
                                         })
                                     })
                                 })
@@ -227,7 +236,24 @@ impl Handler {
                                 outcomes_msg.push(outcome_msg);
                             };
                         }
-                        if outcomes_msg.len() == outcomes.len() {}
+                        if outcomes_msg.len() == outcomes.len() {
+                            // Everything is in order, we can create the bet
+                            match self.bets.create_bet(
+                                &format!("{}", command.guild_id.unwrap()),
+                                &format!("{}", bet_msg.id),
+                                &bet_msg.content,
+                                &outcomes_msg
+                                    .iter()
+                                    .map(|msg| format!("{}", msg.id))
+                                    .collect_vec(),
+                                &outcomes,
+                            ) {
+                                Err(why) => {
+                                    println!("Error while creating bet: {:?}", why)
+                                }
+                                _ => {}
+                            }
+                        }
                     }
                 }
                 Err(why) => println!("{}", why),
@@ -240,6 +266,55 @@ impl Handler {
     }
 
     pub async fn button_clicked(&self, ctx: Context, command: MessageComponentInteraction) {
-        todo!()
+        if let Some(server) = command.guild_id {
+            if let Ok(Channel::Guild(channel)) = command.channel_id.to_channel(&ctx.http).await {
+                let user = command.user;
+                let message = command.message.id();
+                match command.data.custom_id.as_str() {
+                    LOCK => {
+                        println!("lock");
+                    }
+                    ABORT => {
+                        println!("abort");
+                    }
+                    WIN => {
+                        println!("win");
+                    }
+                    i => {
+                        let percent = BET_OPTS[i.parse::<usize>().unwrap()];
+                        match self.bets.bet_on(
+                            &format!("{}", server),
+                            &format!("{}", message),
+                            &format!("{}", user.id),
+                            percent as f32 / 100.0,
+                        ) {
+                            Ok((acc, bet_status)) => {
+                                if let Err(why) = self
+                                    .front
+                                    .update_account_thread(
+                                        &ctx.http,
+                                        server,
+                                        user.id,
+                                        acc.balance,
+                                        format!("You bet {} on {}", -acc.diff, ""),
+                                    )
+                                    .await
+                                {
+                                    println!("Error in account thread update: {:?}", why);
+                                };
+                                if let Err(why) =
+                                    update_options(&ctx.http, &channel, &bet_status).await
+                                {
+                                    println!("Error in updating options: {}", why);
+                                }
+                            }
+                            Err(why) => {
+                                println!("Error while betting: {:?}", why)
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }

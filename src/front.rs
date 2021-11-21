@@ -3,11 +3,13 @@ use crate::utils::lrm;
 use itertools;
 use rusqlite::{Connection, Result};
 use serde_json::{map::Map, value::Value};
+use serenity::model::id::MessageId;
 use serenity::{
     client::Context,
     http::Http,
     model::{
         channel::Channel,
+        channel::GuildChannel,
         id::{ChannelId, GuildId, UserId},
         misc::ChannelIdParseError,
     },
@@ -108,8 +110,20 @@ pub fn options_display(bet_status: &BetStatus) -> Vec<String> {
         .collect()
 }
 
-pub async fn update_options(ctx: &Context, channel_id: ChannelId, bet_status: &BetStatus) {
-    todo!()
+pub async fn update_options(
+    http: &Http,
+    channel: &GuildChannel,
+    bet_status: &BetStatus,
+) -> Result<(), serenity::Error> {
+    let options_msg = options_display(bet_status);
+    for (option, msg) in itertools::izip!(&bet_status.options, options_msg) {
+        channel
+            .edit_message(http, option.option.parse::<u64>().unwrap(), |message| {
+                message.content(msg)
+            })
+            .await?;
+    }
+    Ok(())
 }
 
 pub struct Front {
@@ -255,6 +269,7 @@ impl Front {
     {
         let thread_str = self.get(&format!("{}", server), &format!("{}", user))?;
         let thread = ChannelId::from_str(&thread_str)?;
+        // FIXME: this is extremely rate limited and blocks everything else
         thread
             .edit(http, |edit| edit.name(number_display(balance)))
             .await?;
