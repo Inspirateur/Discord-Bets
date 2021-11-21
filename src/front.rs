@@ -3,7 +3,6 @@ use crate::utils::lrm;
 use itertools;
 use rusqlite::{Connection, Result};
 use serde_json::{map::Map, value::Value};
-use serenity::model::id::MessageId;
 use serenity::{
     client::Context,
     http::Http,
@@ -269,11 +268,11 @@ impl Front {
     {
         let thread_str = self.get(&format!("{}", server), &format!("{}", user))?;
         let thread = ChannelId::from_str(&thread_str)?;
+        thread.say(http, msg).await?;
         // FIXME: this is extremely rate limited and blocks everything else
         thread
             .edit(http, |edit| edit.name(number_display(balance)))
             .await?;
-        thread.say(http, msg).await?;
         Ok(())
     }
 }

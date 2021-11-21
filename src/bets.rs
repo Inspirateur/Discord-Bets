@@ -37,7 +37,6 @@ pub enum BetError {
     NotFound,
     NotEnoughMoney,
     BetLocked,
-    BetNotFound,
     AlreadyExists,
     InternalError(rusqlite::Error),
 }

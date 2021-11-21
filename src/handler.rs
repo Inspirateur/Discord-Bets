@@ -289,6 +289,11 @@ impl Handler {
                             percent as f32 / 100.0,
                         ) {
                             Ok((acc, bet_status)) => {
+                                if let Err(why) =
+                                    update_options(&ctx.http, &channel, &bet_status).await
+                                {
+                                    println!("Error in updating options: {}", why);
+                                }
                                 if let Err(why) = self
                                     .front
                                     .update_account_thread(
@@ -302,11 +307,6 @@ impl Handler {
                                 {
                                     println!("Error in account thread update: {:?}", why);
                                 };
-                                if let Err(why) =
-                                    update_options(&ctx.http, &channel, &bet_status).await
-                                {
-                                    println!("Error in updating options: {}", why);
-                                }
                             }
                             Err(why) => {
                                 println!("Error while betting: {:?}", why)
