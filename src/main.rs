@@ -13,6 +13,7 @@ use serenity::{
                 ApplicationCommandInteraction, ApplicationCommandInteractionDataOptionValue,
                 ApplicationCommandOptionType,
             },
+            message_component::{Button, ButtonStyle},
             Interaction, InteractionResponseType,
         },
     },
@@ -166,12 +167,82 @@ impl Handler {
 
     pub async fn bet(&self, ctx: Context, command: ApplicationCommandInteraction) {
         if let Ok((desc, outcomes)) = Handler::bet_parse(&command) {
-            response(
-                &ctx.http,
-                &command,
-                format!("{}\n{}", desc, outcomes.join("\n")),
-            )
-            .await;
+            if outcomes.len() < 2 {
+                response(
+                    &ctx.http,
+                    &command,
+                    "You must define 2 outcomes or more to create a bet.",
+                )
+                .await;
+                return;
+            }
+            match command
+                .create_interaction_response(&ctx.http, |response| {
+                    response
+                        .kind(InteractionResponseType::ChannelMessageWithSource)
+                        .interaction_response_data(|message| {
+                            message.content(&desc).components(|components| {
+                                components.create_action_row(|action_row| {
+                                    action_row
+                                        .create_button(|button| {
+                                            button
+                                                .custom_id(0)
+                                                .style(ButtonStyle::Primary)
+                                                .label("Lock")
+                                        })
+                                        .create_button(|button| {
+                                            button
+                                                .custom_id(1)
+                                                .style(ButtonStyle::Danger)
+                                                .label("Abort")
+                                        })
+                                })
+                            })
+                        })
+                })
+                .await
+            {
+                Ok(_) => {
+                    if let Ok(bet_msg) = command.get_interaction_response(&ctx.http).await {
+                        let mut outcomes_msg = Vec::new();
+                        for outcome in outcomes.iter() {
+                            if let Ok(outcome_msg) = command
+                                .channel_id
+                                .send_message(&ctx.http, |messsage| {
+                                    messsage.content(outcome).components(|components| {
+                                        components.create_action_row(|action_row| {
+                                            action_row
+                                                .create_button(|button| {
+                                                    button
+                                                        .custom_id(0)
+                                                        .style(ButtonStyle::Secondary)
+                                                        .label("10 %")
+                                                })
+                                                .create_button(|button| {
+                                                    button
+                                                        .custom_id(1)
+                                                        .style(ButtonStyle::Secondary)
+                                                        .label("50 %")
+                                                })
+                                                .create_button(|button| {
+                                                    button
+                                                        .custom_id(2)
+                                                        .style(ButtonStyle::Secondary)
+                                                        .label("All In")
+                                                })
+                                        })
+                                    })
+                                })
+                                .await
+                            {
+                                outcomes_msg.push(outcome_msg);
+                            };
+                        }
+                        if outcomes_msg.len() == outcomes.len() {}
+                    }
+                }
+                Err(why) => println!("{}", why),
+            }
         }
     }
 

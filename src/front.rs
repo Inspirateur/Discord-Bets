@@ -2,16 +2,15 @@ use rusqlite::{Connection, Result};
 use serde_json::{map::Map, value::Value};
 use serenity::{
     client::Context,
-    http::{CacheHttp, Http},
+    http::Http,
     model::{
         channel::Channel,
-        id::{ChannelId, GuildId, MessageId, UserId},
+        id::{ChannelId, GuildId, UserId},
         misc::ChannelIdParseError,
     },
     model::{ModelError, Permissions},
-    Error,
 };
-use std::{collections::HashMap, fmt::Display, str::FromStr};
+use std::{fmt::Display, str::FromStr};
 
 fn balance_display(balance: u32) -> String {
     // TODO: implement clever display with shorteners such as k, m, b
