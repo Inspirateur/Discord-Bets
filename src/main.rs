@@ -1,11 +1,13 @@
 mod bets;
 mod front;
 mod handler;
+mod handler_utils;
 mod utils;
 use crate::front::is_readable;
 use handler::{response, Handler};
 use serenity::{
     async_trait,
+    client::bridge::gateway::GatewayIntents,
     model::{
         gateway::Ready,
         id::GuildId,
@@ -108,6 +110,7 @@ async fn main() {
 
     // Build our client.
     let mut client = Client::builder(token)
+        .intents(GatewayIntents::non_privileged() | GatewayIntents::GUILD_MEMBERS)
         .event_handler(Handler::new())
         .application_id(application_id)
         .await

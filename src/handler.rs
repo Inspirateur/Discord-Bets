@@ -1,30 +1,24 @@
 use crate::bets::{BetError, Bets};
 use crate::front::{bet_stub, options_display, update_options, Front, FrontError};
+use crate::handler_utils::*;
 use itertools::Itertools;
+use serenity::http::CacheHttp;
+use serenity::model::channel::GuildChannel;
 use serenity::{
     http::Http,
     model::channel::Channel,
+    model::channel::Message,
+    model::id::GuildId,
     model::interactions::{
         application_command::{
             ApplicationCommandInteraction, ApplicationCommandInteractionDataOptionValue,
         },
-        message_component::{ButtonStyle, MessageComponentInteraction},
+        message_component::MessageComponentInteraction,
         InteractionResponseType,
     },
     prelude::*,
 };
 use shellwords::{split, MismatchedQuotes};
-const BET_OPTS: [u32; 3] = [10, 50, 100];
-const LOCK: &str = "lock";
-const ABORT: &str = "abort";
-const WIN: &str = "win";
-
-fn bet_opts_display(percent: u32) -> String {
-    match percent {
-        100 => "All in".to_string(),
-        _ => format!("{} %", percent),
-    }
-}
 
 pub struct Handler {
     bets: Bets,
@@ -183,23 +177,9 @@ impl Handler {
                     response
                         .kind(InteractionResponseType::ChannelMessageWithSource)
                         .interaction_response_data(|message| {
-                            message.content(&desc).components(|components| {
-                                components.create_action_row(|action_row| {
-                                    action_row
-                                        .create_button(|button| {
-                                            button
-                                                .custom_id(LOCK)
-                                                .style(ButtonStyle::Primary)
-                                                .label("Lock")
-                                        })
-                                        .create_button(|button| {
-                                            button
-                                                .custom_id(ABORT)
-                                                .style(ButtonStyle::Danger)
-                                                .label("Abort")
-                                        })
-                                })
-                            })
+                            message
+                                .content(&desc)
+                                .components(|components| bet_components(components, OPEN))
                         })
                 })
                 .await
@@ -212,23 +192,7 @@ impl Handler {
                                 .channel_id
                                 .send_message(&ctx.http, |messsage| {
                                     messsage.content(outcome).components(|components| {
-                                        components.create_action_row(|action_row| {
-                                            for (i, percent) in BET_OPTS.into_iter().enumerate() {
-                                                action_row.create_button(|button| {
-                                                    button
-                                                        .custom_id(i)
-                                                        .style(ButtonStyle::Secondary)
-                                                        .label(bet_opts_display(percent))
-                                                });
-                                            }
-                                            action_row.create_button(|button| {
-                                                button
-                                                    .custom_id(WIN)
-                                                    .style(ButtonStyle::Success)
-                                                    .disabled(true)
-                                                    .label("🏆")
-                                            })
-                                        })
+                                        option_components(components, OPEN)
                                     })
                                 })
                                 .await
@@ -265,51 +229,156 @@ impl Handler {
         response(&ctx.http, &command, "nomegalul").await;
     }
 
+    async fn update_bet_components(
+        &self,
+        http: &Http,
+        server: GuildId,
+        channel: GuildChannel,
+        message: &mut Message,
+        status: &str,
+    ) {
+        if let Ok(options) = self
+            .bets
+            .options_of_bet(&format!("{}", server), &format!("{}", message.id))
+        {
+            if let Err(why) = message
+                .edit(http, |msg| {
+                    msg.components(|components| bet_components(components, status))
+                })
+                .await
+            {
+                println!("Failed to edit bet to {}: {}", status, why);
+            }
+            for option in options {
+                if let Ok(mut option_msg) =
+                    channel.message(http, option.parse::<u64>().unwrap()).await
+                {
+                    if let Err(why) = option_msg
+                        .edit(http, |msg| {
+                            msg.components(|components| option_components(components, status))
+                        })
+                        .await
+                    {
+                        println!("Failed to edit option to {}: {}", status, why);
+                    }
+                }
+            }
+        }
+    }
+
     pub async fn button_clicked(&self, ctx: Context, command: MessageComponentInteraction) {
         if let Some(server) = command.guild_id {
             if let Ok(Channel::Guild(channel)) = command.channel_id.to_channel(&ctx.http).await {
                 let user = command.user;
-                let message = command.message.id();
-                match command.data.custom_id.as_str() {
-                    LOCK => {
-                        println!("lock");
-                    }
-                    ABORT => {
-                        println!("abort");
-                    }
-                    WIN => {
-                        println!("win");
-                    }
-                    i => {
-                        let percent = BET_OPTS[i.parse::<usize>().unwrap()];
-                        match self.bets.bet_on(
-                            &format!("{}", server),
-                            &format!("{}", message),
-                            &format!("{}", user.id),
-                            percent as f32 / 100.0,
-                        ) {
-                            Ok((acc, bet_status)) => {
-                                if let Err(why) =
-                                    update_options(&ctx.http, &channel, &bet_status).await
-                                {
-                                    println!("Error in updating options: {}", why);
+                let message_id = command.message.id();
+                if let Ok(mut message) = channel.message(&ctx.http, message_id).await {
+                    match command.data.custom_id.as_str() {
+                        LOCK => {
+                            let mut can_lock = false;
+                            if let Some(interaction) = &message.interaction {
+                                if interaction.user.id == user.id {
+                                    can_lock = true;
                                 }
-                                if let Err(why) = self
-                                    .front
-                                    .update_account_thread(
+                                if let Ok(perms) = channel.permissions_for_user(&ctx, user.id).await
+                                {
+                                    can_lock = perms.manage_channels();
+                                }
+                            }
+
+                            if can_lock {
+                                if let Ok(()) = self
+                                    .bets
+                                    .lock_bet(&format!("{}", server), &format!("{}", message_id))
+                                {
+                                    self.update_bet_components(
                                         &ctx.http,
                                         server,
-                                        user.id,
-                                        acc.balance,
-                                        format!("You bet {} on {}", -acc.diff, ""),
+                                        channel,
+                                        &mut message,
+                                        LOCK,
                                     )
-                                    .await
-                                {
-                                    println!("Error in account thread update: {:?}", why);
-                                };
+                                    .await;
+                                }
+                            } else {
+                                println!("user can't lock");
                             }
-                            Err(why) => {
-                                println!("Error while betting: {:?}", why)
+                        }
+                        ABORT => {
+                            println!("abort");
+                        }
+                        WIN => {
+                            let mut can_close = false;
+                            match channel.permissions_for_user(&ctx.cache, user.id).await {
+                                Ok(perms) => {
+                                    println!("nani the fuck {}", perms);
+                                    can_close = perms.manage_channels();
+                                }
+                                Err(why) => println!("Couldn't get perms of user: {}", why),
+                            }
+                            if can_close {
+                                if let Ok(account_updates) = self
+                                    .bets
+                                    .close_bet(&format!("{}", server), &format!("{}", message_id))
+                                {
+                                    self.update_bet_components(
+                                        &ctx.http(),
+                                        server,
+                                        channel,
+                                        &mut message,
+                                        WIN,
+                                    )
+                                    .await;
+                                    for account_update in account_updates {
+                                        if let Err(why) = self
+                                            .front
+                                            .update_account_thread(
+                                                &ctx.http,
+                                                server,
+                                                account_update.user.parse::<u64>().unwrap().into(),
+                                                account_update.balance,
+                                                format!("You won {}", account_update.diff),
+                                            )
+                                            .await
+                                        {
+                                            println!("Couldn't update account thread: {:?}", why);
+                                        }
+                                    }
+                                }
+                            } else {
+                                println!("user can't close");
+                            }
+                        }
+                        i => {
+                            let percent = BET_OPTS[i.parse::<usize>().unwrap()];
+                            match self.bets.bet_on(
+                                &format!("{}", server),
+                                &format!("{}", message_id),
+                                &format!("{}", user.id),
+                                percent as f32 / 100.0,
+                            ) {
+                                Ok((acc, bet_status)) => {
+                                    if let Err(why) =
+                                        update_options(&ctx.http, &channel, &bet_status).await
+                                    {
+                                        println!("Error in updating options: {}", why);
+                                    }
+                                    if let Err(why) = self
+                                        .front
+                                        .update_account_thread(
+                                            &ctx.http,
+                                            server,
+                                            user.id,
+                                            acc.balance,
+                                            format!("You bet {} on {}", -acc.diff, ""),
+                                        )
+                                        .await
+                                    {
+                                        println!("Error in account thread update: {:?}", why);
+                                    };
+                                }
+                                Err(why) => {
+                                    println!("Error while betting: {:?}", why)
+                                }
                             }
                         }
                     }

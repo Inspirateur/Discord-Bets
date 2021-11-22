@@ -156,7 +156,16 @@ impl Bets {
             .query_row(&[server, option], |row| row.get::<usize, String>(0))?)
     }
 
-    fn options_of_bet(conn: &Connection, server: &str, bet: &str) -> Result<Vec<String>, BetError> {
+    pub fn options_of_bet(&self, server: &str, bet: &str) -> Result<Vec<String>, BetError> {
+        let conn = Connection::open(&self.db_path)?;
+        Bets::_options_of_bet(&conn, server, bet)
+    }
+
+    fn _options_of_bet(
+        conn: &Connection,
+        server: &str,
+        bet: &str,
+    ) -> Result<Vec<String>, BetError> {
         Ok(conn
             .prepare(
                 "SELECT option_id 
@@ -175,7 +184,7 @@ impl Bets {
         option: &str,
     ) -> Result<Vec<String>, BetError> {
         let bet = Bets::bet_of_option(conn, server, option)?;
-        Ok(Bets::options_of_bet(conn, server, &bet)?
+        Ok(Bets::_options_of_bet(conn, server, &bet)?
             .into_iter()
             .filter(|opt| opt != option)
             .collect())
@@ -261,7 +270,7 @@ impl Bets {
         server: &str,
         bet: &str,
     ) -> Result<Vec<OptionStatus>, BetError> {
-        let options = Bets::options_of_bet(conn, server, bet)?;
+        let options = Bets::_options_of_bet(conn, server, bet)?;
         options
             .into_iter()
             .map(|opt| Bets::option_status(conn, server, &opt))
