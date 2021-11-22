@@ -17,7 +17,7 @@ pub fn bet_components<'a>(
     components: &'a mut CreateComponents,
     status: &str,
 ) -> &'a mut CreateComponents {
-    if status == WIN {
+    if status == WIN || status == ABORT {
         return components;
     }
     components.create_action_row(|action_row| {
@@ -42,7 +42,7 @@ pub fn option_components<'a>(
     components: &'a mut CreateComponents,
     status: &str,
 ) -> &'a mut CreateComponents {
-    if status == WIN {
+    if status == WIN || status == ABORT {
         return components;
     }
     components.create_action_row(|action_row| {

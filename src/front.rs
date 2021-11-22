@@ -1,5 +1,6 @@
 use crate::bets::{BetStatus, OptionStatus};
 use crate::utils::lrm;
+use crate::CURRENCY;
 use itertools;
 use rusqlite::{Connection, Result};
 use serde_json::{map::Map, value::Value};
@@ -69,11 +70,12 @@ pub fn bet_stub(options_desc: &Vec<String>) -> BetStatus {
 
 fn option_display(desc: &str, percent: u32, odd: f32, sum: u32, people: u32) -> String {
     format!(
-        "> {}\n`{}%  |  1:{} 🏆   {} 🪙   {} 👥`",
+        "> {}\n` {: >3}%  | {: >6} 🏆  {: >4} {}  {: >4} 👥 `",
         desc,
         percent,
-        number_display(if odd.is_nan() { 1. } else { odd }),
+        "1:".to_string() + &number_display(if odd.is_nan() { 1. } else { odd }),
         number_display(sum),
+        CURRENCY,
         number_display(people)
     )
 }
@@ -271,7 +273,9 @@ impl Front {
         thread.say(http, msg).await?;
         // FIXME: this is extremely rate limited and blocks everything else
         thread
-            .edit(http, |edit| edit.name(number_display(balance)))
+            .edit(http, |edit| {
+                edit.name(format!("{} {}", number_display(balance), CURRENCY))
+            })
             .await?;
         Ok(())
     }

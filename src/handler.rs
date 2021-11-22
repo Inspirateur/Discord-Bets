@@ -1,6 +1,8 @@
+use std::fmt::format;
+
 use crate::bets::{BetError, Bets};
 use crate::front::{bet_stub, options_display, update_options, Front, FrontError};
-use crate::handler_utils::*;
+use crate::{CURRENCY, handler_utils::*};
 use itertools::Itertools;
 use serenity::http::CacheHttp;
 use serenity::model::channel::GuildChannel;
@@ -42,6 +44,18 @@ where
     };
 }
 
+pub async fn follow_up<D>(http: &Http, command: &ApplicationCommandInteraction, msg: D)
+where
+    D: ToString,
+{
+    if let Err(why) = command
+        .create_followup_message(http, |response| response.content(msg))
+        .await
+    {
+        println!("{}", why);
+    };
+}
+
 impl Handler {
     pub fn new() -> Self {
         Handler {
@@ -56,23 +70,34 @@ impl Handler {
             let guild = format!("{}", guild_id);
             let user = format!("{}", command.user.id);
             let mut new_acc = false;
-            let mut resp: Vec<String> = Vec::new();
             // try to create the account
             match self.bets.create_account(&guild, &user, 20) {
                 Err(BetError::AlreadyExists) => {
-                    resp.push("You already have an account.".to_string())
+                    response(
+                        &ctx.http,
+                        &command,
+                        "You already have an account.".to_string(),
+                    )
+                    .await;
                 }
                 Err(BetError::InternalError(why)) => {
-                    resp.push(format!(
-                        "Internal Error while creating the Account ```{}```",
-                        why
-                    ));
+                    response(
+                        &ctx.http,
+                        &command,
+                        format!("Internal Error while creating the Account ```{}```", why),
+                    )
+                    .await;
                     return;
                 }
                 Err(_) => {}
                 Ok(_) => {
                     new_acc = true;
-                    resp.push("Your account was successfully created.".to_string());
+                    response(
+                        &ctx.http,
+                        &command,
+                        "Your account was successfully created.".to_string(),
+                    )
+                    .await;
                 }
             }
             // try to create the account thread
@@ -83,7 +108,12 @@ impl Handler {
                     .await
                 {
                     Ok(()) => {
-                        resp.push("Your account thread was successfully created.".to_string());
+                        follow_up(
+                            &ctx.http,
+                            &command,
+                            "Your account thread was successfully created.".to_string(),
+                        )
+                        .await;
                         let msg = if new_acc {
                             format!(
                                 "Your account has been created with a starting balance of {}",
@@ -92,39 +122,68 @@ impl Handler {
                         } else {
                             String::from("It seems your previous Account Thread is gone, this is the new one.")
                         };
-                        match self.front.update_account_thread(
-                            &ctx.http,
-                            guild_id,
-                            command.user.id,
-                            balance,
-                            msg,
-                        )
-                        .await
+                        match self
+                            .front
+                            .update_account_thread(
+                                &ctx.http,
+                                guild_id,
+                                command.user.id,
+                                balance,
+                                msg,
+                            )
+                            .await
                         {
                             Err(FrontError::LackPermission(perms)) => {
-                                resp.push(format!("Cannot update the Account Thread because I am lacking the permissions: {}", perms))
+                                follow_up(
+                                    &ctx.http,
+                                    &command,
+                                    format!("Cannot update the Account Thread because I am lacking the permissions: {}", perms),
+                                ).await;
                             }
                             Err(FrontError::InternalError(why)) => {
-                                resp.push(format!("Internal error while updating Account Thread ```{}```", why))
+                                follow_up(
+                                    &ctx.http,
+                                    &command,
+                                    format!(
+                                        "Internal error while updating Account Thread ```{}```",
+                                        why
+                                    ),
+                                )
+                                .await
                             }
                             _ => {}
                         }
                     }
-                    Err(FrontError::LackPermission(perms)) => resp.push(format!(
-                        "Cannot create the Account Thread because I am lacking the permissions: {}",
-                        perms
-                    )),
-                    Err(FrontError::AlreadyExists) => {
-                        resp.push("You already have an account thread.".to_string())
-                    }
-                    Err(FrontError::InternalError(why)) => resp.push(format!(
-                        "Internal error while creating the Account Thread ```{}```",
-                        why
-                    )),
+                    Err(FrontError::LackPermission(perms)) => 
+                    follow_up(
+                        &ctx.http,
+                        &command,
+                        format!(
+                            "Cannot create the Account Thread because I am lacking the permissions: {}",
+                            perms
+                        ),
+                    )
+                    .await,
+                    Err(FrontError::AlreadyExists) => 
+                        follow_up(
+                            &ctx.http,
+                            &command,
+                            "You already have an account thread.".to_string(),
+                        )
+                        .await,
+                    Err(FrontError::InternalError(why)) => 
+                    follow_up(
+                        &ctx.http,
+                        &command,
+                        format!(
+                            "Internal error while creating the Account Thread ```{}```",
+                            why
+                        ),
+                    )
+                    .await,
                     _ => {}
                 }
             }
-            response(&ctx.http, &command, resp.join("\n")).await;
         }
     }
 
@@ -263,9 +322,14 @@ impl Handler {
             .bets
             .options_of_bet(&format!("{}", server), &format!("{}", message.id))
         {
+            let content = message.content.clone();
             if let Err(why) = message
                 .edit(http, |msg| {
-                    msg.components(|components| bet_components(components, status))
+                    msg.components(|components| bet_components(components, status));
+                    if status == ABORT {
+                        msg.content(format!("**ABORTED**\n{}", content));
+                    }
+                    msg
                 })
                 .await
             {
@@ -285,6 +349,8 @@ impl Handler {
                     }
                 }
             }
+        } else {
+            println!("Failed to get options of the bet");
         }
     }
 
@@ -319,7 +385,63 @@ impl Handler {
                             }
                         }
                         ABORT => {
-                            println!("abort");
+                            let mut can_abort = false;
+                            match channel.permissions_for_user(&ctx.cache, user.id).await {
+                                Ok(perms) => {
+                                    can_abort = perms.manage_channels();
+                                }
+                                Err(why) => println!("Couldn't get perms of user: {}", why),
+                            }
+                            if can_abort {   
+                                if let Ok(account_updates) = self.bets.abort_bet(
+                                    &format!("{}", server),
+                                    &format!("{}", message.id),
+                                ) {
+                                    // Announce the aborting
+                                    let content = message.content.clone();
+                                    if let Err(why) = message.reply(
+                                        &ctx.http, 
+                                        "The bet has been aborted ! Wagers are being refunded.", 
+                                    ).await {
+                                        println!("Couldn't reply to announce the aborting: {}", why);
+                                    }
+                                    // pass bet in "ABORT" state in front end
+                                    self.update_bet(
+                                        &ctx.http(),
+                                        server,
+                                        channel,
+                                        &mut message,
+                                        ABORT,
+                                    )
+                                    .await;
+                                    // update the accounts
+                                    for account_update in account_updates {
+                                        if let Err(why) = self
+                                            .front
+                                            .update_account_thread(
+                                                &ctx.http,
+                                                server,
+                                                account_update
+                                                    .user
+                                                    .parse::<u64>()
+                                                    .unwrap()
+                                                    .into(),
+                                                account_update.balance,
+                                                format!(
+                                                    "You got back **{}** {} because the bet was aborted",
+                                                    account_update.diff, CURRENCY
+                                                ),
+                                            )
+                                            .await
+                                        {
+                                            println!(
+                                                "Couldn't update account thread: {:?}",
+                                                why
+                                            );
+                                        }
+                                    }
+                                }
+                            }
                         }
                         WIN => {
                             let mut can_close = false;
@@ -338,6 +460,19 @@ impl Handler {
                                         &format!("{}", server),
                                         &format!("{}", message.id),
                                     ) {
+                                        // Announce the win
+                                        let content = message.content.clone();
+                                        if let Err(why) = bet_msg.reply(
+                                            &ctx.http, 
+                                            format!(
+                                                "{}\nhas won ! **{}** {} is shared between the winners.", 
+                                                content,
+                                                account_updates.iter().fold(0, |i, acc| i + acc.diff), 
+                                                CURRENCY
+                                            )
+                                        ).await {
+                                            println!("Couldn't reply to announce the winner: {}", why);
+                                        }
                                         // pass bet in "WIN" state in front end
                                         self.update_bet(
                                             &ctx.http(),
@@ -347,8 +482,16 @@ impl Handler {
                                             WIN,
                                         )
                                         .await;
+                                        // update winning option
+                                        if let Err(why) = message
+                                        .edit(&ctx.http, |msg| {
+                                            msg.content(format!("**WINNER**\n{}", content))
+                                        })
+                                        .await 
+                                        {
+                                            println!("Couldn't edit winning option: {}", why);
+                                        }
                                         // update the accounts
-                                        let content = message.content.clone();
                                         for account_update in account_updates {
                                             if let Err(why) = self
                                                 .front
@@ -362,8 +505,8 @@ impl Handler {
                                                         .into(),
                                                     account_update.balance,
                                                     format!(
-                                                        "You won **{}** by betting on:\n{}",
-                                                        account_update.diff, content
+                                                        "You won **{}** {} by betting on:\n{}",
+                                                        account_update.diff, CURRENCY, content
                                                     ),
                                                 )
                                                 .await
@@ -374,15 +517,7 @@ impl Handler {
                                                 );
                                             }
                                         }
-                                        // update winning option
-                                        if let Err(why) = message
-                                            .edit(&ctx.http, |msg| {
-                                                msg.content(format!("**WINNER**\n{}", content))
-                                            })
-                                            .await
-                                        {
-                                            println!("Couldn't edit winning option: {}", why);
-                                        }
+
                                     }
                                 } else {
                                     println!("Couldn't get bet msg associated to winning option");
@@ -413,8 +548,8 @@ impl Handler {
                                             user.id,
                                             acc.balance,
                                             format!(
-                                                "You bet **{}** on:\n{}",
-                                                -acc.diff, message.content
+                                                "You bet **{}** {} on:\n{}",
+                                                -acc.diff, CURRENCY, message.content
                                             ),
                                         )
                                         .await

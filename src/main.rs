@@ -17,6 +17,7 @@ use serenity::{
     prelude::*,
 };
 use std::env;
+pub const CURRENCY: &str = "💵";
 
 #[async_trait]
 impl EventHandler for Handler {
