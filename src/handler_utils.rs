@@ -17,22 +17,24 @@ pub fn bet_components<'a>(
     components: &'a mut CreateComponents,
     status: &str,
 ) -> &'a mut CreateComponents {
+    if status == WIN {
+        return components;
+    }
     components.create_action_row(|action_row| {
-        action_row
-            .create_button(|button| {
+        if status != LOCK {
+            action_row.create_button(|button| {
                 button
                     .custom_id(LOCK)
                     .style(ButtonStyle::Primary)
                     .label("Lock")
-                    .disabled(status == LOCK || status == WIN)
-            })
-            .create_button(|button| {
-                button
-                    .custom_id(ABORT)
-                    .style(ButtonStyle::Danger)
-                    .label("Abort")
-                    .disabled(status == WIN)
-            })
+            });
+        }
+        action_row.create_button(|button| {
+            button
+                .custom_id(ABORT)
+                .style(ButtonStyle::Danger)
+                .label("Abort")
+        })
     })
 }
 
@@ -40,22 +42,27 @@ pub fn option_components<'a>(
     components: &'a mut CreateComponents,
     status: &str,
 ) -> &'a mut CreateComponents {
+    if status == WIN {
+        return components;
+    }
     components.create_action_row(|action_row| {
-        for (i, percent) in BET_OPTS.into_iter().enumerate() {
+        if status == OPEN {
+            for (i, percent) in BET_OPTS.into_iter().enumerate() {
+                action_row.create_button(|button| {
+                    button
+                        .custom_id(i)
+                        .style(ButtonStyle::Secondary)
+                        .label(bet_opts_display(percent))
+                });
+            }
+        } else if status == LOCK {
             action_row.create_button(|button| {
                 button
-                    .custom_id(i)
-                    .style(ButtonStyle::Secondary)
-                    .label(bet_opts_display(percent))
-                    .disabled(status == LOCK || status == WIN)
+                    .custom_id(WIN)
+                    .style(ButtonStyle::Success)
+                    .label("🏆")
             });
         }
-        action_row.create_button(|button| {
-            button
-                .custom_id(WIN)
-                .style(ButtonStyle::Success)
-                .disabled(status != LOCK)
-                .label("🏆")
-        })
+        action_row
     })
 }

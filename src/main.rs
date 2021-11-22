@@ -8,6 +8,7 @@ use handler::{response, Handler};
 use serenity::{
     async_trait,
     client::bridge::gateway::GatewayIntents,
+    http::Http,
     model::{
         gateway::Ready,
         id::GuildId,
@@ -20,9 +21,9 @@ use std::env;
 #[async_trait]
 impl EventHandler for Handler {
     async fn interaction_create(&self, ctx: Context, interaction: Interaction) {
-        // only answer if the bot has access to the channel
         match interaction {
             Interaction::ApplicationCommand(command) => {
+                // only answer if the bot has access to the channel
                 if is_readable(&ctx, command.channel_id).await {
                     match command.data.name.as_str() {
                         "make_account" => self.make_account(ctx, command).await,
@@ -102,17 +103,22 @@ async fn main() {
     // Configure the client with your Discord bot token in the environment.
     let token = env::var("GOTOH_TOKEN").expect("Expected a token in the environment");
 
-    // The Application Id is usually the Bot User Id.
-    let application_id: u64 = env::var("GOTOH_ID")
-        .expect("Expected an application id in the environment")
-        .parse()
-        .expect("application id is not a valid id");
+    let http = Http::new_with_token(&token);
 
+    // The Application Id is usually the Bot User Id.
+    let bot_id = match http.get_current_application_info().await {
+        Ok(info) => info.id,
+        Err(why) => panic!("Could not access application info: {:?}", why),
+    };
     // Build our client.
     let mut client = Client::builder(token)
-        .intents(GatewayIntents::non_privileged() | GatewayIntents::GUILD_MEMBERS)
+        .intents(
+            GatewayIntents::non_privileged()
+                | GatewayIntents::GUILD_MEMBERS
+                | GatewayIntents::GUILD_PRESENCES,
+        )
         .event_handler(Handler::new())
-        .application_id(application_id)
+        .application_id(bot_id.into())
         .await
         .expect("Error creating client");
 

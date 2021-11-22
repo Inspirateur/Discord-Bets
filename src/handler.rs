@@ -4,6 +4,7 @@ use crate::handler_utils::*;
 use itertools::Itertools;
 use serenity::http::CacheHttp;
 use serenity::model::channel::GuildChannel;
+use serenity::model::id::MessageId;
 use serenity::{
     http::Http,
     model::channel::Channel,
@@ -57,7 +58,7 @@ impl Handler {
             let mut new_acc = false;
             let mut resp: Vec<String> = Vec::new();
             // try to create the account
-            match self.bets.create_account(&guild, &user, 10) {
+            match self.bets.create_account(&guild, &user, 20) {
                 Err(BetError::AlreadyExists) => {
                     resp.push("You already have an account.".to_string())
                 }
@@ -229,7 +230,28 @@ impl Handler {
         response(&ctx.http, &command, "nomegalul").await;
     }
 
-    async fn update_bet_components(
+    async fn bet_msg_from_opt(
+        &self,
+        http: &Http,
+        server: GuildId,
+        channel: &GuildChannel,
+        message_id: MessageId,
+    ) -> Option<Message> {
+        if let Ok(bet_message_id) = self
+            .bets
+            .bet_of_option(&format!("{}", server), &format!("{}", message_id))
+        {
+            if let Ok(bet_message) = channel
+                .message(http, bet_message_id.parse::<u64>().unwrap())
+                .await
+            {
+                return Some(bet_message);
+            }
+        }
+        None
+    }
+
+    async fn update_bet(
         &self,
         http: &Http,
         server: GuildId,
@@ -270,8 +292,7 @@ impl Handler {
         if let Some(server) = command.guild_id {
             if let Ok(Channel::Guild(channel)) = command.channel_id.to_channel(&ctx.http).await {
                 let user = command.user;
-                let message_id = command.message.id();
-                if let Ok(mut message) = channel.message(&ctx.http, message_id).await {
+                if let Some(mut message) = command.message.regular() {
                     match command.data.custom_id.as_str() {
                         LOCK => {
                             let mut can_lock = false;
@@ -288,16 +309,10 @@ impl Handler {
                             if can_lock {
                                 if let Ok(()) = self
                                     .bets
-                                    .lock_bet(&format!("{}", server), &format!("{}", message_id))
+                                    .lock_bet(&format!("{}", server), &format!("{}", message.id))
                                 {
-                                    self.update_bet_components(
-                                        &ctx.http,
-                                        server,
-                                        channel,
-                                        &mut message,
-                                        LOCK,
-                                    )
-                                    .await;
+                                    self.update_bet(&ctx.http, server, channel, &mut message, LOCK)
+                                        .await;
                                 }
                             } else {
                                 println!("user can't lock");
@@ -310,39 +325,67 @@ impl Handler {
                             let mut can_close = false;
                             match channel.permissions_for_user(&ctx.cache, user.id).await {
                                 Ok(perms) => {
-                                    println!("nani the fuck {}", perms);
                                     can_close = perms.manage_channels();
                                 }
                                 Err(why) => println!("Couldn't get perms of user: {}", why),
                             }
                             if can_close {
-                                if let Ok(account_updates) = self
-                                    .bets
-                                    .close_bet(&format!("{}", server), &format!("{}", message_id))
+                                if let Some(mut bet_msg) = self
+                                    .bet_msg_from_opt(&ctx.http, server, &channel, message.id)
+                                    .await
                                 {
-                                    self.update_bet_components(
-                                        &ctx.http(),
-                                        server,
-                                        channel,
-                                        &mut message,
-                                        WIN,
-                                    )
-                                    .await;
-                                    for account_update in account_updates {
-                                        if let Err(why) = self
-                                            .front
-                                            .update_account_thread(
-                                                &ctx.http,
-                                                server,
-                                                account_update.user.parse::<u64>().unwrap().into(),
-                                                account_update.balance,
-                                                format!("You won {}", account_update.diff),
-                                            )
+                                    if let Ok(account_updates) = self.bets.close_bet(
+                                        &format!("{}", server),
+                                        &format!("{}", message.id),
+                                    ) {
+                                        // pass bet in "WIN" state in front end
+                                        self.update_bet(
+                                            &ctx.http(),
+                                            server,
+                                            channel,
+                                            &mut bet_msg,
+                                            WIN,
+                                        )
+                                        .await;
+                                        // update the accounts
+                                        let content = message.content.clone();
+                                        for account_update in account_updates {
+                                            if let Err(why) = self
+                                                .front
+                                                .update_account_thread(
+                                                    &ctx.http,
+                                                    server,
+                                                    account_update
+                                                        .user
+                                                        .parse::<u64>()
+                                                        .unwrap()
+                                                        .into(),
+                                                    account_update.balance,
+                                                    format!(
+                                                        "You won **{}** by betting on:\n{}",
+                                                        account_update.diff, content
+                                                    ),
+                                                )
+                                                .await
+                                            {
+                                                println!(
+                                                    "Couldn't update account thread: {:?}",
+                                                    why
+                                                );
+                                            }
+                                        }
+                                        // update winning option
+                                        if let Err(why) = message
+                                            .edit(&ctx.http, |msg| {
+                                                msg.content(format!("**WINNER**\n{}", content))
+                                            })
                                             .await
                                         {
-                                            println!("Couldn't update account thread: {:?}", why);
+                                            println!("Couldn't edit winning option: {}", why);
                                         }
                                     }
+                                } else {
+                                    println!("Couldn't get bet msg associated to winning option");
                                 }
                             } else {
                                 println!("user can't close");
@@ -352,7 +395,7 @@ impl Handler {
                             let percent = BET_OPTS[i.parse::<usize>().unwrap()];
                             match self.bets.bet_on(
                                 &format!("{}", server),
-                                &format!("{}", message_id),
+                                &format!("{}", message.id),
                                 &format!("{}", user.id),
                                 percent as f32 / 100.0,
                             ) {
@@ -369,7 +412,10 @@ impl Handler {
                                             server,
                                             user.id,
                                             acc.balance,
-                                            format!("You bet {} on {}", -acc.diff, ""),
+                                            format!(
+                                                "You bet **{}** on:\n{}",
+                                                -acc.diff, message.content
+                                            ),
                                         )
                                         .await
                                     {

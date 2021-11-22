@@ -72,7 +72,7 @@ fn option_display(desc: &str, percent: u32, odd: f32, sum: u32, people: u32) -> 
         "> {}\n`{}%  |  1:{} 🏆   {} 🪙   {} 👥`",
         desc,
         percent,
-        number_display(odd),
+        number_display(if odd.is_nan() { 1. } else { odd }),
         number_display(sum),
         number_display(people)
     )

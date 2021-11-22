@@ -100,6 +100,16 @@ impl Bets {
             )",
             [],
         )?;
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS ToDelete (
+                server_id TEXT,
+                bet_id TEXT,
+                FOREIGN KEY(server_id, bet_id) REFERENCES Bet(server_id, bet_id) ON DELETE CASCADE,
+                PRIMARY KEY(server_id, bet_id)
+            )",
+            [],
+        )?;
+        conn.execute("DELETE FROM ToDelete", [])?;
         Ok(Bets {
             db_path: db_path.to_string(),
         })
@@ -144,7 +154,12 @@ impl Bets {
         Ok(tx.commit()?)
     }
 
-    fn bet_of_option(conn: &Connection, server: &str, option: &str) -> Result<String, BetError> {
+    pub fn bet_of_option(&self, server: &str, option: &str) -> Result<String, BetError> {
+        let conn = Connection::open(&self.db_path)?;
+        Bets::_bet_of_option(&conn, server, option)
+    }
+
+    fn _bet_of_option(conn: &Connection, server: &str, option: &str) -> Result<String, BetError> {
         Ok(conn
             .prepare(
                 "SELECT bet_id 
@@ -183,7 +198,7 @@ impl Bets {
         server: &str,
         option: &str,
     ) -> Result<Vec<String>, BetError> {
-        let bet = Bets::bet_of_option(conn, server, option)?;
+        let bet = Bets::_bet_of_option(conn, server, option)?;
         Ok(Bets::_options_of_bet(conn, server, &bet)?
             .into_iter()
             .filter(|opt| opt != option)
@@ -299,7 +314,7 @@ impl Bets {
     ) -> Result<(AccountUpdate, BetStatus), BetError> {
         let mut conn = Connection::open(&self.db_path)?;
         // check if the bet is open
-        let bet = Bets::bet_of_option(&conn, server, option)?;
+        let bet = Bets::_bet_of_option(&conn, server, option)?;
         if !Bets::is_bet_open(&conn, server, &bet)? {
             return Err(BetError::BetLocked);
         }
@@ -393,10 +408,12 @@ impl Bets {
                 balance: balance,
             });
         }
+        // delete the bet
         conn.execute(
-            "DELETE FROM Bet
-            WHERE server_id = ?1 AND bet_id = ?2",
-            &[server, bet],
+            "INSERT 
+            INTO ToDelete (server_id, bet_id)
+            VALUES (?1, ?2)",
+            &[server, &bet],
         )?;
         Ok(account_updates)
     }
@@ -408,7 +425,7 @@ impl Bets {
     ) -> Result<Vec<AccountUpdate>, BetError> {
         let conn = Connection::open(&self.db_path)?;
         // retrieve the total of the bet and the winning parts
-        let bet = Bets::bet_of_option(&conn, server, winning_option)?;
+        let bet = Bets::_bet_of_option(&conn, server, winning_option)?;
         let options_statuses = Bets::options_statuses(&conn, server, &bet)?;
         let mut winners: Vec<String> = Vec::new();
         let mut wins: Vec<u32> = Vec::new();
@@ -446,8 +463,9 @@ impl Bets {
         }
         // delete the bet
         conn.execute(
-            "DELETE FROM Bet
-            WHERE server_id = ?1 AND bet_id = ?2",
+            "INSERT 
+            INTO ToDelete (server_id, bet_id)
+            VALUES (?1, ?2)",
             &[server, &bet],
         )?;
         Ok(account_updates)
@@ -537,7 +555,7 @@ mod tests {
                 if let Err(why) = bets.create_bet(
                     "server",
                     "bet1",
-                    "Est-ce que roux va dormir bientot ?",
+                    "Will roux go to sleep soon ?",
                     &vec!["opt1", "opt2"],
                     &vec!["oui", "non"],
                 ) {
