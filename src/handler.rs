@@ -28,19 +28,19 @@ pub struct Handler {
     pub is_loop_running: AtomicBool,
 }
 
-
 pub async fn passive_income(ctx: Arc<Context>, bets: Arc<Bets>, front: Arc<Front>) {
     // give INCOME to every one that has an account
     match bets.income(INCOME) {
         Ok(acc_updates) => {
-            if let Err(why) = front.update_account_threads(&ctx.http, acc_updates, "").await {
+            if let Err(why) = front.update_account_threads(
+                &ctx.http, acc_updates, format!("Passive income: **+{{diff}}** {}", CURRENCY)
+            ).await {
                 println!("Couldn't update account threads: {:?}", why);
             }
         },
         Err(why) => println!("Couldn't distribute income: {:?}", why)
     }
 }
-
 
 pub async fn response<D>(http: &Http, command: &ApplicationCommandInteraction, msg: D)
 where
@@ -78,7 +78,6 @@ impl Handler {
             is_loop_running: AtomicBool::new(false),
         }
     }
-
 
     pub async fn make_account(&self, ctx: Context, command: ApplicationCommandInteraction) {
         // we only do something if the command was used in a server

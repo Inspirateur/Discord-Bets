@@ -116,9 +116,9 @@ impl EventHandler for Handler {
             let front1 = Arc::clone(&front);
             tokio::spawn(async move {
                 loop {
+                    tokio::time::sleep(Duration::from_secs(3600 * INTERVAL)).await;
                     passive_income(Arc::clone(&ctx1), Arc::clone(&bets1), Arc::clone(&front1))
                         .await;
-                    tokio::time::sleep(Duration::from_secs(3600 * INTERVAL)).await;
                 }
             });
             self.is_loop_running.swap(true, Ordering::Relaxed);

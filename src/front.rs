@@ -15,7 +15,6 @@ use serenity::{
     },
     model::{ModelError, Permissions},
 };
-use std::borrow::Borrow;
 use std::{cmp::min, fmt::Display, str::FromStr};
 
 const NUM_SUFFIX: [&str; 5] = ["", "K", "M", "B", "T"];
