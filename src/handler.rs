@@ -1,8 +1,7 @@
-use std::fmt::format;
-
-use crate::bets::{BetError, Bets};
+use crate::bets::{BetError, Bets, AccountUpdate};
 use crate::front::{bet_stub, options_display, update_options, Front, FrontError};
-use crate::{CURRENCY, handler_utils::*};
+use crate::{CURRENCY, STARTING_COINS, INCOME, handler_utils::*};
+use std::sync::{atomic::AtomicBool, Arc};
 use itertools::Itertools;
 use serenity::http::CacheHttp;
 use serenity::model::channel::GuildChannel;
@@ -24,9 +23,24 @@ use serenity::{
 use shellwords::{split, MismatchedQuotes};
 
 pub struct Handler {
-    bets: Bets,
-    front: Front,
+    pub bets: Bets,
+    pub front: Front,
+    pub is_loop_running: AtomicBool,
 }
+
+
+pub async fn passive_income(ctx: Arc<Context>, bets: Arc<Bets>, front: Arc<Front>) {
+    // give INCOME to every one that has an account
+    match bets.income(INCOME) {
+        Ok(acc_updates) => {
+            if let Err(why) = front.update_account_threads(&ctx.http, acc_updates, "").await {
+                println!("Couldn't update account threads: {:?}", why);
+            }
+        },
+        Err(why) => println!("Couldn't distribute income: {:?}", why)
+    }
+}
+
 
 pub async fn response<D>(http: &Http, command: &ApplicationCommandInteraction, msg: D)
 where
@@ -61,8 +75,10 @@ impl Handler {
         Handler {
             bets: Bets::new("bets.db").unwrap(),
             front: Front::new("front.db").unwrap(),
+            is_loop_running: AtomicBool::new(false),
         }
     }
+
 
     pub async fn make_account(&self, ctx: Context, command: ApplicationCommandInteraction) {
         // we only do something if the command was used in a server
@@ -71,7 +87,7 @@ impl Handler {
             let user = format!("{}", command.user.id);
             let mut new_acc = false;
             // try to create the account
-            match self.bets.create_account(&guild, &user, 20) {
+            match self.bets.create_account(&guild, &user, STARTING_COINS) {
                 Err(BetError::AlreadyExists) => {
                     response(
                         &ctx.http,
@@ -126,9 +142,12 @@ impl Handler {
                             .front
                             .update_account_thread(
                                 &ctx.http,
-                                guild_id,
-                                command.user.id,
-                                balance,
+                                AccountUpdate { 
+                                    server: guild_id.0.to_string(),
+                                    user: format!("{}", command.user.id), 
+                                    diff: balance as i32, 
+                                    balance: balance,
+                                },
                                 msg,
                             )
                             .await
@@ -398,7 +417,6 @@ impl Handler {
                                     &format!("{}", message.id),
                                 ) {
                                     // Announce the aborting
-                                    let content = message.content.clone();
                                     if let Err(why) = message.reply(
                                         &ctx.http, 
                                         "The bet has been aborted ! Wagers are being refunded.", 
@@ -415,30 +433,22 @@ impl Handler {
                                     )
                                     .await;
                                     // update the accounts
-                                    for account_update in account_updates {
-                                        if let Err(why) = self
-                                            .front
-                                            .update_account_thread(
-                                                &ctx.http,
-                                                server,
-                                                account_update
-                                                    .user
-                                                    .parse::<u64>()
-                                                    .unwrap()
-                                                    .into(),
-                                                account_update.balance,
-                                                format!(
-                                                    "You got back **{}** {} because the bet was aborted",
-                                                    account_update.diff, CURRENCY
-                                                ),
-                                            )
-                                            .await
-                                        {
-                                            println!(
-                                                "Couldn't update account thread: {:?}",
-                                                why
-                                            );
-                                        }
+                                    if let Err(why) = self
+                                        .front
+                                        .update_account_threads(
+                                            &ctx.http,
+                                            account_updates,
+                                            format!(
+                                                "You got back **{{diff}}** {} because the bet was aborted",
+                                                CURRENCY
+                                            ),
+                                        )
+                                        .await
+                                    {
+                                        println!(
+                                            "Couldn't update account thread: {:?}",
+                                            why
+                                        );
                                     }
                                 }
                             }
@@ -492,32 +502,23 @@ impl Handler {
                                             println!("Couldn't edit winning option: {}", why);
                                         }
                                         // update the accounts
-                                        for account_update in account_updates {
-                                            if let Err(why) = self
-                                                .front
-                                                .update_account_thread(
-                                                    &ctx.http,
-                                                    server,
-                                                    account_update
-                                                        .user
-                                                        .parse::<u64>()
-                                                        .unwrap()
-                                                        .into(),
-                                                    account_update.balance,
-                                                    format!(
-                                                        "You won **{}** {} by betting on:\n{}",
-                                                        account_update.diff, CURRENCY, content
-                                                    ),
-                                                )
-                                                .await
-                                            {
-                                                println!(
-                                                    "Couldn't update account thread: {:?}",
-                                                    why
-                                                );
-                                            }
+                                        if let Err(why) = self
+                                            .front
+                                            .update_account_threads(
+                                                &ctx.http,
+                                                account_updates,
+                                                format!(
+                                                    "You won **{{diff}}** {} by betting on:\n{}",
+                                                    CURRENCY, content
+                                                ),
+                                            )
+                                            .await
+                                        {
+                                            println!(
+                                                "Couldn't update account thread: {:?}",
+                                                why
+                                            );
                                         }
-
                                     }
                                 } else {
                                     println!("Couldn't get bet msg associated to winning option");
@@ -544,9 +545,7 @@ impl Handler {
                                         .front
                                         .update_account_thread(
                                             &ctx.http,
-                                            server,
-                                            user.id,
-                                            acc.balance,
+                                            acc.clone(),
                                             format!(
                                                 "You bet **{}** {} on:\n{}",
                                                 -acc.diff, CURRENCY, message.content

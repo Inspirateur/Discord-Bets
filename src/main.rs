@@ -3,8 +3,8 @@ mod front;
 mod handler;
 mod handler_utils;
 mod utils;
-use crate::front::is_readable;
-use handler::{response, Handler};
+use front::is_readable;
+use handler::{passive_income, response, Handler};
 use serenity::{
     async_trait,
     client::bridge::gateway::GatewayIntents,
@@ -16,8 +16,15 @@ use serenity::{
     },
     prelude::*,
 };
-use std::env;
+use std::{
+    env,
+    sync::{atomic::Ordering, Arc},
+    time::Duration,
+};
 pub const CURRENCY: &str = "💵";
+pub const STARTING_COINS: u32 = 100;
+pub const INCOME: u32 = 1;
+pub const INTERVAL: u64 = 4;
 
 #[async_trait]
 impl EventHandler for Handler {
@@ -95,6 +102,26 @@ impl EventHandler for Handler {
             {
                 println!("{}", why);
             };
+        }
+    }
+
+    async fn cache_ready(&self, ctx: Context, _guilds: Vec<GuildId>) {
+        println!("Cache built successfully!");
+        let ctx = Arc::new(ctx);
+        let bets = Arc::new(self.bets.clone());
+        let front = Arc::new(self.front.clone());
+        if !self.is_loop_running.load(Ordering::Relaxed) {
+            let ctx1 = Arc::clone(&ctx);
+            let bets1 = Arc::clone(&bets);
+            let front1 = Arc::clone(&front);
+            tokio::spawn(async move {
+                loop {
+                    passive_income(Arc::clone(&ctx1), Arc::clone(&bets1), Arc::clone(&front1))
+                        .await;
+                    tokio::time::sleep(Duration::from_secs(3600 * INTERVAL)).await;
+                }
+            });
+            self.is_loop_running.swap(true, Ordering::Relaxed);
         }
     }
 }

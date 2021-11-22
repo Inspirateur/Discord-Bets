@@ -2,11 +2,14 @@ use crate::utils;
 use rusqlite::{Connection, Result};
 use std::collections::HashMap;
 
+#[derive(Debug, Clone)]
 pub struct Bets {
     db_path: String,
 }
 
+#[derive(Debug, Clone)]
 pub struct AccountUpdate {
+    pub server: String,
     pub user: String,
     pub diff: i32,
     pub balance: u32,
@@ -124,6 +127,33 @@ impl Bets {
             &[server, user, &format!("{}", amount)],
         )?;
         Ok(())
+    }
+
+    pub fn income(&self, income: u32) -> Result<Vec<AccountUpdate>, BetError> {
+        let conn = Connection::open(&self.db_path)?;
+        conn.execute(
+            "UPDATE Account
+            SET balance = balance + ?1",
+            [income],
+        )?;
+        let mut account_updates = Vec::new();
+        let mut stmt = conn
+            .prepare(
+                "SELECT server_id, user_id, balance 
+                    FROM Account
+                    ",
+            )
+            .unwrap();
+        let mut rows = stmt.query([])?;
+        while let Some(row) = rows.next()? {
+            account_updates.push(AccountUpdate {
+                server: row.get::<usize, String>(0)?,
+                user: row.get::<usize, String>(1)?,
+                balance: row.get::<usize, u32>(2)?,
+                diff: income as i32,
+            });
+        }
+        Ok(account_updates)
     }
 
     pub fn create_bet<T: AsRef<str>>(
@@ -364,6 +394,7 @@ impl Bets {
             .query_row(&[server, &bet], |row| row.get::<usize, String>(0))?;
         Ok((
             AccountUpdate {
+                server: server.to_string(),
                 user: user.to_string(),
                 diff: -(amount as i32),
                 balance: Bets::_balance(&conn, server, user)?,
@@ -403,6 +434,7 @@ impl Bets {
                 &[&format!("{}", balance), server, &user],
             )?;
             account_updates.push(AccountUpdate {
+                server: server.to_string(),
                 user: user,
                 diff: amount as i32,
                 balance: balance,
@@ -456,6 +488,7 @@ impl Bets {
                 &[&format!("{}", balance), server, user],
             )?;
             account_updates.push(AccountUpdate {
+                server: server.to_string(),
                 user: user.to_string(),
                 diff: *gain as i32,
                 balance: balance,

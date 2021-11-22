@@ -1,4 +1,4 @@
-use crate::bets::{BetStatus, OptionStatus};
+use crate::bets::{AccountUpdate, BetStatus, OptionStatus};
 use crate::utils::lrm;
 use crate::CURRENCY;
 use itertools;
@@ -15,6 +15,7 @@ use serenity::{
     },
     model::{ModelError, Permissions},
 };
+use std::borrow::Borrow;
 use std::{cmp::min, fmt::Display, str::FromStr};
 
 const NUM_SUFFIX: [&str; 5] = ["", "K", "M", "B", "T"];
@@ -127,6 +128,7 @@ pub async fn update_options(
     Ok(())
 }
 
+#[derive(Debug, Clone)]
 pub struct Front {
     db_path: String,
 }
@@ -260,23 +262,57 @@ impl Front {
     pub async fn update_account_thread<D>(
         &self,
         http: &Http,
-        server: GuildId,
-        user: UserId,
-        balance: u32,
+        acc_update: AccountUpdate,
         msg: D,
     ) -> Result<(), FrontError>
     where
         D: Display,
     {
-        let thread_str = self.get(&format!("{}", server), &format!("{}", user))?;
-        let thread = ChannelId::from_str(&thread_str)?;
-        thread.say(http, msg).await?;
+        self.update_account_threads(http, vec![acc_update], msg)
+            .await
+    }
+
+    pub async fn update_account_threads<D>(
+        &self,
+        http: &Http,
+        acc_updates: Vec<AccountUpdate>,
+        msg: D,
+    ) -> Result<(), FrontError>
+    where
+        D: Display,
+    {
+        let threads_str = acc_updates
+            .iter()
+            .map(|acc_update| self.get(&format!("{}", &acc_update.server), &acc_update.user))
+            .collect::<Result<Vec<_>, _>>()?;
+        let threads: Vec<_> = threads_str
+            .into_iter()
+            .map(|thread_str| ChannelId::from_str(&thread_str).unwrap())
+            .collect();
+        for (thread, acc_update) in itertools::izip!(&threads, &acc_updates) {
+            thread
+                .say(
+                    http,
+                    format!(
+                        "{}\nNew balance: **{}** {}",
+                        msg, acc_update.balance, CURRENCY
+                    )
+                    .replace("{diff}", &acc_update.diff.to_string()),
+                )
+                .await?;
+        }
         // FIXME: this is extremely rate limited and blocks everything else
-        thread
-            .edit(http, |edit| {
-                edit.name(format!("{} {}", number_display(balance), CURRENCY))
-            })
-            .await?;
+        for (thread, acc_update) in itertools::izip!(&threads, &acc_updates) {
+            thread
+                .edit(http, |edit| {
+                    edit.name(format!(
+                        "{} {}",
+                        number_display(acc_update.balance),
+                        CURRENCY
+                    ))
+                })
+                .await?;
+        }
         Ok(())
     }
 }
