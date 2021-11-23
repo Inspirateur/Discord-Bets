@@ -613,7 +613,7 @@ impl Bets {
             .map(|(user, balance)| AccountStatus {
                 user: user.clone(),
                 balance: balance,
-                in_bet: wagers[&user],
+                in_bet: *wagers.get(&user).unwrap_or(&0),
             })
             .collect())
     }

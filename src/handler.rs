@@ -306,7 +306,29 @@ impl Handler {
     }
 
     pub async fn leadeboard(&self, ctx: Context, command: ApplicationCommandInteraction) {
-        response(&ctx.http, &command, "nomegalul").await;
+        if let Some(guild_id) = command.guild_id {
+            match self.bets.accounts(&guild_id.0.to_string()) {
+                Ok(mut accounts) => {
+                    accounts.sort_by_key(|acc| acc.balance+acc.in_bet);
+                    accounts.reverse();
+                    let msg = format!("{}  ({} in bet)   user\n", CURRENCY, CURRENCY) 
+                    + &accounts.into_iter().take(10).map(|acc| 
+                        format!("{}  ({})   <@{}>", acc.balance, acc.in_bet, acc.user)
+                    ).join("\n") + "\n...";
+                    if let Err(why) = command
+                        .create_interaction_response(&ctx.http, |response| {
+                            response
+                                .kind(InteractionResponseType::ChannelMessageWithSource)
+                                .interaction_response_data(|message| message.content(msg).allowed_mentions(|mentions| mentions.empty_users()))
+                        })
+                        .await
+                    {
+                        println!("{}", why);
+                    };
+                },
+                Err(why) => println!("Couldn't retrieve accounts: {:?}", why)
+            }
+        }
     }
 
     pub async fn reset(&self, ctx: Context, command: ApplicationCommandInteraction) {
