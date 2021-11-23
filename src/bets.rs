@@ -129,6 +129,24 @@ impl Bets {
         Ok(())
     }
 
+    pub fn reset(&self, server: &str, amount: u32) -> Result<(), BetError> {
+        let mut conn = Connection::open(&self.db_path)?;
+        let tx = conn.transaction()?;
+        tx.execute(
+            "DELETE
+            FROM Bet
+            WHERE server_id = ?1",
+            &[server],
+        )?;
+        tx.execute(
+            "UPDATE Account
+            SET balance = ?1
+            WHERE server_id = ?2",
+            &[&amount.to_string(), server],
+        )?;
+        Ok(tx.commit()?)
+    }
+
     pub fn income(&self, income: u32) -> Result<Vec<AccountUpdate>, BetError> {
         let conn = Connection::open(&self.db_path)?;
         conn.execute(
@@ -335,6 +353,23 @@ impl Bets {
             != 0)
     }
 
+    fn assert_bet_not_deleted(conn: &Connection, server: &str, bet: &str) -> Result<(), BetError> {
+        if conn
+            .prepare(
+                "SELECT * 
+                FROM ToDelete
+                WHERE server_id = ?1 AND bet_id = ?2
+                ",
+            )
+            .unwrap()
+            .exists(&[server, bet])?
+        {
+            Err(BetError::NotFound)
+        } else {
+            Ok(())
+        }
+    }
+
     pub fn bet_on(
         &self,
         server: &str,
@@ -348,6 +383,7 @@ impl Bets {
         if !Bets::is_bet_open(&conn, server, &bet)? {
             return Err(BetError::BetLocked);
         }
+        Bets::assert_bet_not_deleted(&conn, server, &bet)?;
         // check if the user has not already bet on other options of the same bet
         let other_wagers = Bets::other_wagers(&conn, server, option, user)?;
         if other_wagers.len() > 0 {
@@ -419,34 +455,42 @@ impl Bets {
     }
 
     pub fn abort_bet(&self, server: &str, bet: &str) -> Result<Vec<AccountUpdate>, BetError> {
-        let conn = Connection::open(&self.db_path)?;
-        let options_statuses = Bets::options_statuses(&conn, server, &bet)?;
-        let mut account_updates = Vec::new();
-        for (user, amount) in options_statuses
+        let mut conn = Connection::open(&self.db_path)?;
+        Bets::assert_bet_not_deleted(&conn, server, bet)?;
+        let wagers: Vec<(String, u32)> = Bets::options_statuses(&conn, server, &bet)?
             .into_iter()
             .flat_map(|option_status| option_status.wagers)
-        {
-            let balance = Bets::_balance(&conn, server, &user)? + amount;
-            conn.execute(
+            .collect();
+        let mut account_updates = Vec::new();
+        // retrieve the balance of winners
+        let balances = wagers
+            .iter()
+            .map(|(user, _)| Ok(Bets::_balance(&conn, server, user)?))
+            .collect::<Result<Vec<_>, BetError>>()?;
+
+        let tx = conn.transaction()?;
+        for ((user, amount), balance) in itertools::izip!(wagers, balances) {
+            tx.execute(
                 "UPDATE Account
                 SET balance = ?1
                 WHERE server_id = ?2 AND user_id = ?3",
-                &[&format!("{}", balance), server, &user],
+                &[&format!("{}", balance + amount), server, &user],
             )?;
             account_updates.push(AccountUpdate {
                 server: server.to_string(),
                 user: user,
                 diff: amount as i32,
-                balance: balance,
+                balance: balance + amount,
             });
         }
         // delete the bet
-        conn.execute(
+        tx.execute(
             "INSERT 
             INTO ToDelete (server_id, bet_id)
             VALUES (?1, ?2)",
             &[server, &bet],
         )?;
+        tx.commit()?;
         Ok(account_updates)
     }
 
@@ -455,9 +499,10 @@ impl Bets {
         server: &str,
         winning_option: &str,
     ) -> Result<Vec<AccountUpdate>, BetError> {
-        let conn = Connection::open(&self.db_path)?;
+        let mut conn = Connection::open(&self.db_path)?;
         // retrieve the total of the bet and the winning parts
         let bet = Bets::_bet_of_option(&conn, server, winning_option)?;
+        Bets::assert_bet_not_deleted(&conn, server, &bet)?;
         let options_statuses = Bets::options_statuses(&conn, server, &bet)?;
         let mut winners: Vec<String> = Vec::new();
         let mut wins: Vec<u32> = Vec::new();
@@ -477,30 +522,36 @@ impl Bets {
         }
         // compute the gains for each winners
         let gains = utils::lrm(total, &wins);
+        // retrieve the balance of winners
+        let balances = winners
+            .iter()
+            .map(|winner| Ok(Bets::_balance(&conn, server, winner)?))
+            .collect::<Result<Vec<_>, BetError>>()?;
         // update the accounts
         let mut account_updates = Vec::new();
-        for (user, gain) in winners.iter().zip(gains.iter()) {
-            let balance = Bets::_balance(&conn, server, user)? + gain;
-            conn.execute(
+        let tx = conn.transaction()?;
+        for (user, balance, gain) in itertools::izip!(winners, balances, gains) {
+            tx.execute(
                 "UPDATE Account
                 SET balance = ?1
                 WHERE server_id = ?2 AND user_id = ?3",
-                &[&format!("{}", balance), server, user],
+                &[&format!("{}", balance + gain), server, &user],
             )?;
             account_updates.push(AccountUpdate {
                 server: server.to_string(),
                 user: user.to_string(),
-                diff: *gain as i32,
-                balance: balance,
+                diff: gain as i32,
+                balance: balance + gain,
             });
         }
         // delete the bet
-        conn.execute(
+        tx.execute(
             "INSERT 
             INTO ToDelete (server_id, bet_id)
             VALUES (?1, ?2)",
             &[server, &bet],
         )?;
+        tx.commit()?;
         Ok(account_updates)
     }
 

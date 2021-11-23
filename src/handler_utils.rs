@@ -5,6 +5,8 @@ pub const LOCK: &str = "lock";
 pub const ABORT: &str = "abort";
 pub const WIN: &str = "win";
 pub const OPEN: &str = "open";
+pub const CANCEL: &str = "cancel";
+pub const RESET: &str = "reset";
 
 fn bet_opts_display(percent: u32) -> String {
     match percent {

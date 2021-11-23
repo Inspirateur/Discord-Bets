@@ -37,6 +37,7 @@ impl EventHandler for Handler {
                         "make_account" => self.make_account(ctx, command).await,
                         "bet" => self.bet(ctx, command).await,
                         "leaderboard" => self.leadeboard(ctx, command).await,
+                        "reset" => self.reset(ctx, command).await,
                         _ => {}
                     };
                 } else {
@@ -96,6 +97,11 @@ impl EventHandler for Handler {
                                         .kind(ApplicationCommandOptionType::Boolean)
                                         .required(false)
                                 })
+                        })
+                        .create_application_command(|command| {
+                            command
+                                .name("reset")
+                                .description("Abort every active bet and resets every account on the server to the starting sum")
                         })
                 })
                 .await

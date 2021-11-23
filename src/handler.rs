@@ -5,7 +5,8 @@ use std::sync::{atomic::AtomicBool, Arc};
 use itertools::Itertools;
 use serenity::http::CacheHttp;
 use serenity::model::channel::GuildChannel;
-use serenity::model::id::MessageId;
+use serenity::model::id::{MessageId, UserId};
+use serenity::model::interactions::message_component::ButtonStyle;
 use serenity::{
     http::Http,
     model::channel::Channel,
@@ -240,6 +241,7 @@ impl Handler {
     }
 
     pub async fn bet(&self, ctx: Context, command: ApplicationCommandInteraction) {
+        // TODO: silence notifications in bet message
         if let Ok((desc, outcomes)) = Handler::bet_parse(&command) {
             if outcomes.len() < 2 {
                 response(
@@ -307,6 +309,49 @@ impl Handler {
         response(&ctx.http, &command, "nomegalul").await;
     }
 
+    pub async fn reset(&self, ctx: Context, command: ApplicationCommandInteraction) {
+        if let Some(guild_id) = command.guild_id {
+            if let Some(guild) = guild_id.to_guild_cached(&ctx).await {
+                if let Ok(perms) = guild.member_permissions(&ctx.http, command.user.id).await {
+                    if perms.administrator() {
+                        if let Err(why) = command
+                            .create_interaction_response(ctx.http, |response| {
+                                response
+                                    .kind(InteractionResponseType::ChannelMessageWithSource)
+                                    .interaction_response_data(|message| 
+                                        message.content("⚠️ RESETTING WILL:\n1/ ABORT EVERY ACTIVE BET\n2/ RESET EVERY ACCOUNT TO THE STARTING SUM\n(administrator only)")
+                                        .components(|components| components.create_action_row(|action_row| 
+                                            action_row.create_button(|button| 
+                                                button.custom_id("cancel").label("Cancel").style(ButtonStyle::Secondary)
+                                            ).create_button(|button|
+                                                button.custom_id("reset").label("RESET").style(ButtonStyle::Danger)
+                                            )
+                                        ))
+                                    )
+                            })
+                            .await
+                        {
+                            println!("Couldn't send reset message: {}", why);
+                        };
+                    } else {
+                        if let Err(why) = command
+                            .create_interaction_response(ctx.http, |response| {
+                                response
+                                    .kind(InteractionResponseType::ChannelMessageWithSource)
+                                    .interaction_response_data(|message| 
+                                        message.content("Resetting requires administrator permissions.")
+                                    )
+                            })
+                            .await
+                        {
+                            println!("Couldn't send lack of perm message for reset: {}", why);
+                        };
+                    }
+                }
+            }
+        }
+    }
+
     async fn bet_msg_from_opt(
         &self,
         http: &Http,
@@ -372,100 +417,134 @@ impl Handler {
         }
     }
 
+    async fn bet_clicked(&self, http: &Http, server: GuildId, channel: GuildChannel, message: &mut Message, user_id: UserId, percent: u32) {
+        match self.bets.bet_on(
+            &format!("{}", server),
+            &format!("{}", message.id),
+            &format!("{}", user_id),
+            percent as f32 / 100.0,
+        ) {
+            Ok((acc, bet_status)) => {
+                if let Err(why) =
+                    update_options(&http, &channel, &bet_status).await
+                {
+                    println!("Error in updating options: {}", why);
+                }
+                if let Err(why) = self
+                    .front
+                    .update_account_thread(
+                        &http,
+                        acc.clone(),
+                        format!(
+                            "You bet **{}** {} on:\n{}",
+                            -acc.diff, CURRENCY, message.content
+                        ),
+                    )
+                    .await
+                {
+                    println!("Error in account thread update: {:?}", why);
+                };
+            }
+            Err(why) => {
+                println!("Error while betting: {:?}", why)
+            }
+        }
+    }
+
     pub async fn button_clicked(&self, ctx: Context, command: MessageComponentInteraction) {
         if let Some(server) = command.guild_id {
             if let Ok(Channel::Guild(channel)) = command.channel_id.to_channel(&ctx.http).await {
                 let user = command.user;
                 if let Some(mut message) = command.message.regular() {
-                    match command.data.custom_id.as_str() {
-                        LOCK => {
-                            let mut can_lock = false;
-                            if let Some(interaction) = &message.interaction {
-                                if interaction.user.id == user.id {
-                                    can_lock = true;
+                    let button = command.data.custom_id.as_str();
+                    if let Ok(i) = button.parse::<usize>() {
+                        let percent = BET_OPTS[i];
+                        self.bet_clicked(&ctx.http, server, channel, &mut message, user.id, percent).await;
+                    } else if button == CANCEL || button == RESET {
+                        // check for admin perm
+                        if let Some(guild) = server.to_guild_cached(&ctx).await {
+                            if let Ok(perms) = guild.member_permissions(&ctx.http, user.id).await {
+                                if perms.administrator() {
+                                    if button == CANCEL {
+                                        if let Err(why) = message.edit(&ctx.http, |msg| msg.components(|components| components).content("RESET CANCELLED")).await {
+                                            println!("Couldn't cancel the reset: {}", why);
+                                        }
+                                    } else if button == RESET {
+                                        // reset every account on the server
+                                        if let Err(why) = self.bets.reset(&server.0.to_string(), STARTING_COINS) {
+                                            println!("Couldn't reset accounts in db: {:?}", why);
+                                        } else if let Err(why) = self.front.update_account_thread_reset(&ctx.http, &server.0.to_string()).await {
+                                            println!("Couldn't display reset in account threads: {:?}", why);
+                                        } else if let Err(why) = message.edit(&ctx.http, |msg| msg.components(|components| components).content("ALL ACCOUNTS ARE RESET")).await {
+                                            println!("Couldn't edit the reset message: {}", why);
+                                        }
+                                    }
                                 }
-                                if let Ok(perms) = channel.permissions_for_user(&ctx, user.id).await
-                                {
-                                    can_lock = perms.manage_channels();
-                                }
-                            }
-
-                            if can_lock {
-                                if let Ok(()) = self
-                                    .bets
-                                    .lock_bet(&format!("{}", server), &format!("{}", message.id))
-                                {
-                                    self.update_bet(&ctx.http, server, channel, &mut message, LOCK)
-                                        .await;
-                                }
-                            } else {
-                                println!("user can't lock");
                             }
                         }
-                        ABORT => {
-                            let mut can_abort = false;
-                            match channel.permissions_for_user(&ctx.cache, user.id).await {
-                                Ok(perms) => {
-                                    can_abort = perms.manage_channels();
-                                }
-                                Err(why) => println!("Couldn't get perms of user: {}", why),
+                    } else {
+                        let mut bet_msg = message.clone();
+                        if button == WIN {
+                            match self
+                                .bet_msg_from_opt(&ctx.http, server, &channel, message.id)
+                                .await 
+                            { 
+                                Some(bet_msg_) => bet_msg = bet_msg_,
+                                None => println!("Couldn't retrieve bet message from win option")
                             }
-                            if can_abort {   
-                                if let Ok(account_updates) = self.bets.abort_bet(
-                                    &format!("{}", server),
-                                    &format!("{}", message.id),
-                                ) {
-                                    // Announce the aborting
-                                    if let Err(why) = message.reply(
-                                        &ctx.http, 
-                                        "The bet has been aborted ! Wagers are being refunded.", 
-                                    ).await {
-                                        println!("Couldn't reply to announce the aborting: {}", why);
-                                    }
-                                    // pass bet in "ABORT" state in front end
-                                    self.update_bet(
-                                        &ctx.http(),
-                                        server,
-                                        channel,
-                                        &mut message,
-                                        ABORT,
-                                    )
-                                    .await;
-                                    // update the accounts
-                                    if let Err(why) = self
-                                        .front
-                                        .update_account_threads(
-                                            &ctx.http,
-                                            account_updates,
-                                            format!(
-                                                "You got back **{{diff}}** {} because the bet was aborted",
-                                                CURRENCY
-                                            ),
-                                        )
-                                        .await
+                        }
+                        if let Some(interaction) = &bet_msg.interaction {
+                            if interaction.user.id == user.id {
+                                if button == LOCK {
+                                    if let Ok(()) = self
+                                        .bets
+                                        .lock_bet(&format!("{}", server), &format!("{}", message.id))
                                     {
-                                        println!(
-                                            "Couldn't update account thread: {:?}",
-                                            why
-                                        );
+                                        self.update_bet(&ctx.http, server, channel, &mut message, LOCK)
+                                            .await;
                                     }
-                                }
-                            }
-                        }
-                        WIN => {
-                            let mut can_close = false;
-                            match channel.permissions_for_user(&ctx.cache, user.id).await {
-                                Ok(perms) => {
-                                    can_close = perms.manage_channels();
-                                }
-                                Err(why) => println!("Couldn't get perms of user: {}", why),
-                            }
-                            if can_close {
-                                if let Some(mut bet_msg) = self
-                                    .bet_msg_from_opt(&ctx.http, server, &channel, message.id)
-                                    .await
-                                {
-                                    if let Ok(account_updates) = self.bets.close_bet(
+                                } else if button == ABORT {
+                                    if let Ok(account_updates) = self.bets.abort_bet(
+                                        &format!("{}", server),
+                                        &format!("{}", message.id),
+                                    ) {
+                                        // Announce the aborting
+                                        if let Err(why) = message.reply(
+                                            &ctx.http, 
+                                            "The bet has been aborted ! Wagers are being refunded.", 
+                                        ).await {
+                                            println!("Couldn't reply to announce the aborting: {}", why);
+                                        }
+                                        // pass bet in "ABORT" state in front end
+                                        self.update_bet(
+                                            &ctx.http(),
+                                            server,
+                                            channel,
+                                            &mut message,
+                                            ABORT,
+                                        )
+                                        .await;
+                                        // update the accounts
+                                        if let Err(why) = self
+                                            .front
+                                            .update_account_threads(
+                                                &ctx.http,
+                                                account_updates,
+                                                format!(
+                                                    "You got back **{{diff}}** {} because the bet was aborted",
+                                                    CURRENCY
+                                                ),
+                                            )
+                                            .await
+                                        {
+                                            println!(
+                                                "Couldn't update account thread: {:?}",
+                                                why
+                                            );
+                                        }
+                                    }
+                                } else if button == WIN {
+                                     if let Ok(account_updates) = self.bets.close_bet(
                                         &format!("{}", server),
                                         &format!("{}", message.id),
                                     ) {
@@ -519,45 +598,9 @@ impl Handler {
                                             );
                                         }
                                     }
-                                } else {
-                                    println!("Couldn't get bet msg associated to winning option");
                                 }
                             } else {
-                                println!("user can't close");
-                            }
-                        }
-                        i => {
-                            let percent = BET_OPTS[i.parse::<usize>().unwrap()];
-                            match self.bets.bet_on(
-                                &format!("{}", server),
-                                &format!("{}", message.id),
-                                &format!("{}", user.id),
-                                percent as f32 / 100.0,
-                            ) {
-                                Ok((acc, bet_status)) => {
-                                    if let Err(why) =
-                                        update_options(&ctx.http, &channel, &bet_status).await
-                                    {
-                                        println!("Error in updating options: {}", why);
-                                    }
-                                    if let Err(why) = self
-                                        .front
-                                        .update_account_thread(
-                                            &ctx.http,
-                                            acc.clone(),
-                                            format!(
-                                                "You bet **{}** {} on:\n{}",
-                                                -acc.diff, CURRENCY, message.content
-                                            ),
-                                        )
-                                        .await
-                                    {
-                                        println!("Error in account thread update: {:?}", why);
-                                    };
-                                }
-                                Err(why) => {
-                                    println!("Error while betting: {:?}", why)
-                                }
+                                println!("user can't administrate the bet");
                             }
                         }
                     }

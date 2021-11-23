@@ -1,6 +1,6 @@
 use crate::bets::{AccountUpdate, BetStatus, OptionStatus};
 use crate::utils::lrm;
-use crate::CURRENCY;
+use crate::{CURRENCY, STARTING_COINS};
 use itertools;
 use rusqlite::{Connection, Result};
 use serde_json::{map::Map, value::Value};
@@ -197,21 +197,32 @@ impl Front {
 
     fn get(&self, server: &str, user: &str) -> Result<String, FrontError> {
         let conn = Connection::open(&self.db_path)?;
-        let res = match conn
+        let res = conn
             .prepare(
                 "SELECT thread_id 
-                	FROM AccountThread
-                	WHERE server_id = ?1 AND user_id = ?2
-                	",
+                FROM AccountThread
+                WHERE server_id = ?1 AND user_id = ?2
+                ",
             )
             .unwrap()
-            .query_map(&[server, user], |row| row.get::<usize, String>(0))?
-            .next()
-        {
-            Some(res) => Ok(res?),
-            None => Err(FrontError::NotFound),
-        };
-        res
+            .query_row(&[server, user], |row| row.get::<usize, String>(0));
+        Ok(res?)
+    }
+
+    fn get_all(&self, server: &str) -> Result<Vec<String>, FrontError> {
+        let conn = Connection::open(&self.db_path)?;
+        let res = conn
+            .prepare(
+                "SELECT thread_id 
+            FROM AccountThread
+            WHERE server_id = ?1
+            ",
+            )
+            .unwrap()
+            .query_map(&[server], |row| row.get::<usize, String>(0))?
+            .into_iter()
+            .collect::<Result<Vec<String>, _>>()?;
+        Ok(res)
     }
 
     pub async fn create_account_thread(
@@ -300,7 +311,6 @@ impl Front {
                 )
                 .await?;
         }
-        // FIXME: this is extremely rate limited and blocks everything else
         for (thread, acc_update) in itertools::izip!(&threads, &acc_updates) {
             thread
                 .edit(http, |edit| {
@@ -309,6 +319,37 @@ impl Front {
                         number_display(acc_update.balance),
                         CURRENCY
                     ))
+                })
+                .await?;
+        }
+        Ok(())
+    }
+
+    pub async fn update_account_thread_reset(
+        &self,
+        http: &Http,
+        server: &str,
+    ) -> Result<(), FrontError> {
+        let threads_str = self.get_all(server)?;
+        let threads: Vec<_> = threads_str
+            .into_iter()
+            .map(|thread_str| ChannelId::from_str(&thread_str).unwrap())
+            .collect();
+        for thread in &threads {
+            thread
+                .say(
+                    http,
+                    format!(
+                        "ACCOUNT RESET\nNew balance: **{}** {}",
+                        STARTING_COINS, CURRENCY
+                    ),
+                )
+                .await?;
+        }
+        for thread in threads {
+            thread
+                .edit(http, |edit| {
+                    edit.name(format!("{} {}", number_display(STARTING_COINS), CURRENCY))
                 })
                 .await?;
         }
