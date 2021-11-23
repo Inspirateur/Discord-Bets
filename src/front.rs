@@ -147,6 +147,8 @@ impl From<rusqlite::Error> for FrontError {
             if sqlerr.extended_code == 1555 {
                 return FrontError::AlreadyExists;
             }
+        } else if let rusqlite::Error::QueryReturnedNoRows = err {
+            return FrontError::NotFound;
         }
         FrontError::InternalError(format!("{:?}", err))
     }

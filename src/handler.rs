@@ -473,10 +473,10 @@ impl Handler {
                                         // reset every account on the server
                                         if let Err(why) = self.bets.reset(&server.0.to_string(), STARTING_COINS) {
                                             println!("Couldn't reset accounts in db: {:?}", why);
-                                        } else if let Err(why) = self.front.update_account_thread_reset(&ctx.http, &server.0.to_string()).await {
-                                            println!("Couldn't display reset in account threads: {:?}", why);
                                         } else if let Err(why) = message.edit(&ctx.http, |msg| msg.components(|components| components).content("ALL ACCOUNTS ARE RESET")).await {
                                             println!("Couldn't edit the reset message: {}", why);
+                                        } else if let Err(why) = self.front.update_account_thread_reset(&ctx.http, &server.0.to_string()).await {
+                                            println!("Couldn't display reset in account threads: {:?}", why);
                                         }
                                     }
                                 }
