@@ -442,7 +442,7 @@ impl Handler {
             }
             Err(BetError::NotEnoughMoney) => {
                 self.front.error_account_thread(
-                    http, &server.0.to_string(), 
+                    http, &server.0.to_string(), &user_id.0.to_string(),
                     format!(
                         "Your bet on:\n{}\nwas rejected because you don't have enough coins to bet.\nThe passive income gives you **{}** {} ever {} hours",
                         message.content, INCOME, CURRENCY, INTERVAL
@@ -452,7 +452,7 @@ impl Handler {
             Err(BetError::MultiOpt(opts)) => {
                 if let Ok(other_msg) = channel.message(http, opts[0].parse::<u64>().unwrap()).await {
                     self.front.error_account_thread(
-                        http, &server.0.to_string(), 
+                        http, &server.0.to_string(), &user_id.0.to_string(), 
                         format!(
                             "Your bet on:\n{}\nwas rejected because you cannot bet on multiple options and are already betting on:\n{}",
                             message.content, other_msg.content

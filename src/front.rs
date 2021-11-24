@@ -376,18 +376,24 @@ impl Front {
         &self,
         http: &Http,
         server: &str,
+        user: &str,
         msg: D,
     ) -> Result<(), FrontError>
     where
         D: Display,
     {
-        todo!()
+        let thread_str = self.get(server, user)?;
+        let thread = ChannelId::from_str(&thread_str).unwrap();
+        thread.say(http, msg).await?;
+        Ok(())
     }
 
-    pub async fn error_account_thread<D>(&self, http: &Http, server: &str, msg: D)
+    pub async fn error_account_thread<D>(&self, http: &Http, server: &str, user: &str, msg: D)
     where
         D: Display,
     {
-        todo!()
+        if let Err(why) = self._error_account_thread(http, server, user, msg).await {
+            println!("Error when sending error msg to account thread: {:?}", why);
+        }
     }
 }
