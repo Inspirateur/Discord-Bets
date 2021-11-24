@@ -36,7 +36,7 @@ pub struct AccountStatus {
 
 #[derive(Debug)]
 pub enum BetError {
-    MultiOpt(Vec<(String, u32)>),
+    MultiOpt(Vec<String>),
     NotFound,
     NotEnoughMoney,
     BetLocked,
@@ -386,8 +386,10 @@ impl Bets {
         Bets::assert_bet_not_deleted(&conn, server, &bet)?;
         // check if the user has not already bet on other options of the same bet
         let other_wagers = Bets::other_wagers(&conn, server, option, user)?;
-        if other_wagers.len() > 0 {
-            return Err(BetError::MultiOpt(other_wagers));
+        if other_wagers.len() >= 1 {
+            return Err(BetError::MultiOpt(
+                other_wagers.into_iter().map(|(opt, _)| opt).collect(),
+            ));
         }
         // compute the amount to bet
         assert!(0. <= fraction && fraction <= 1.);

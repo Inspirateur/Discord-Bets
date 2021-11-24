@@ -271,12 +271,7 @@ impl Front {
         Ok(())
     }
 
-    pub async fn update_account_thread<D>(
-        &self,
-        http: &Http,
-        acc_update: AccountUpdate,
-        msg: D,
-    ) -> Result<(), FrontError>
+    pub async fn update_account_thread<D>(&self, http: &Http, acc_update: AccountUpdate, msg: D)
     where
         D: Display,
     {
@@ -284,7 +279,7 @@ impl Front {
             .await
     }
 
-    pub async fn update_account_threads<D>(
+    async fn _update_account_threads<D>(
         &self,
         http: &Http,
         acc_updates: Vec<AccountUpdate>,
@@ -327,7 +322,20 @@ impl Front {
         Ok(())
     }
 
-    pub async fn update_account_thread_reset(
+    pub async fn update_account_threads<D>(
+        &self,
+        http: &Http,
+        acc_updates: Vec<AccountUpdate>,
+        msg: D,
+    ) where
+        D: Display,
+    {
+        if let Err(why) = self._update_account_threads(http, acc_updates, msg).await {
+            println!("Failed to update account threads: {:?}", why);
+        }
+    }
+
+    async fn _update_account_thread_reset(
         &self,
         http: &Http,
         server: &str,
@@ -356,5 +364,30 @@ impl Front {
                 .await?;
         }
         Ok(())
+    }
+
+    pub async fn update_account_thread_reset(&self, http: &Http, server: &str) {
+        if let Err(why) = self._update_account_thread_reset(http, server).await {
+            println!("Failed to update account thread for reset: {:?}", why);
+        }
+    }
+
+    async fn _error_account_thread<D>(
+        &self,
+        http: &Http,
+        server: &str,
+        msg: D,
+    ) -> Result<(), FrontError>
+    where
+        D: Display,
+    {
+        todo!()
+    }
+
+    pub async fn error_account_thread<D>(&self, http: &Http, server: &str, msg: D)
+    where
+        D: Display,
+    {
+        todo!()
     }
 }
