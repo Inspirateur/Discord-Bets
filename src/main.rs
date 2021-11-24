@@ -22,8 +22,8 @@ use std::{
     time::Duration,
 };
 pub const CURRENCY: &str = "💵";
-pub const STARTING_COINS: u32 = 100;
-pub const INCOME: u32 = 1;
+pub const STARTING_COINS: u32 = 300;
+pub const INCOME: u32 = 5;
 pub const INTERVAL: u64 = 3;
 
 #[async_trait]
