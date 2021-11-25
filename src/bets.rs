@@ -1,5 +1,5 @@
 use crate::utils;
-use rusqlite::{Connection, Result};
+use rusqlite::{Connection, Result, Transaction};
 use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
@@ -456,12 +456,36 @@ impl Bets {
         Ok(())
     }
 
+    fn delete_bet(
+        tx: &Transaction,
+        server: &str,
+        bet: &str,
+        options: Vec<&str>,
+    ) -> Result<(), BetError> {
+        tx.execute(
+            "INSERT 
+            INTO ToDelete (server_id, bet_id)
+            VALUES (?1, ?2)",
+            &[server, &bet],
+        )?;
+        for option in options {
+            tx.execute(
+                "DROP
+                FROM Wager
+                WHERE server_id = ?1, option_id = ?2",
+                &[server, option],
+            )?;
+        }
+        Ok(())
+    }
+
     pub fn abort_bet(&self, server: &str, bet: &str) -> Result<Vec<AccountUpdate>, BetError> {
         let mut conn = Connection::open(&self.db_path)?;
         Bets::assert_bet_not_deleted(&conn, server, bet)?;
-        let wagers: Vec<(String, u32)> = Bets::options_statuses(&conn, server, &bet)?
-            .into_iter()
-            .flat_map(|option_status| option_status.wagers)
+        let options = Bets::options_statuses(&conn, server, &bet)?;
+        let wagers: Vec<(String, u32)> = options
+            .iter()
+            .flat_map(|option_status| option_status.wagers.clone())
             .collect();
         let mut account_updates = Vec::new();
         // retrieve the balance of winners
@@ -486,11 +510,14 @@ impl Bets {
             });
         }
         // delete the bet
-        tx.execute(
-            "INSERT 
-            INTO ToDelete (server_id, bet_id)
-            VALUES (?1, ?2)",
-            &[server, &bet],
+        Bets::delete_bet(
+            &tx,
+            server,
+            bet,
+            options
+                .iter()
+                .map(|option| option.option.as_str())
+                .collect(),
         )?;
         tx.commit()?;
         Ok(account_updates)
@@ -509,16 +536,16 @@ impl Bets {
         let mut winners: Vec<String> = Vec::new();
         let mut wins: Vec<u32> = Vec::new();
         let mut total = 0;
-        for option_status in options_statuses {
+        for option_status in &options_statuses {
             let option_sum = option_status
                 .wagers
                 .iter()
                 .fold(0, |init, wager| init + wager.1);
             total += option_sum;
             if option_status.option == winning_option {
-                for (winner, win) in option_status.wagers {
-                    winners.push(winner);
-                    wins.push(win);
+                for (winner, win) in &option_status.wagers {
+                    winners.push(winner.clone());
+                    wins.push(*win);
                 }
             }
         }
@@ -547,11 +574,14 @@ impl Bets {
             });
         }
         // delete the bet
-        tx.execute(
-            "INSERT 
-            INTO ToDelete (server_id, bet_id)
-            VALUES (?1, ?2)",
-            &[server, &bet],
+        Bets::delete_bet(
+            &tx,
+            server,
+            &bet,
+            options_statuses
+                .iter()
+                .map(|option| option.option.as_str())
+                .collect(),
         )?;
         tx.commit()?;
         Ok(account_updates)
