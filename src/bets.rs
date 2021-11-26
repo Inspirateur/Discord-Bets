@@ -112,7 +112,15 @@ impl Bets {
             )",
             [],
         )?;
-        conn.execute("DELETE FROM ToDelete", [])?;
+        conn.execute(
+            "DELETE FROM Bet
+            WHERE EXISTS (
+                SELECT * 
+                FROM ToDelete 
+                WHERE ToDelete.server_id = Bet.server_id AND ToDelete.bet_id = Bet.bet_id
+            )",
+            [],
+        )?;
         Ok(Bets {
             db_path: db_path.to_string(),
         })
@@ -470,9 +478,9 @@ impl Bets {
         )?;
         for option in options {
             tx.execute(
-                "DROP
+                "DELETE
                 FROM Wager
-                WHERE server_id = ?1, option_id = ?2",
+                WHERE server_id = ?1 AND option_id = ?2",
                 &[server, option],
             )?;
         }
@@ -690,7 +698,15 @@ mod tests {
                     println!("8 {:?}", why);
                 }
             }
-            Err(why) => println!("{:?}", why),
+            Err(why) => println!("0 {:?}", why),
         };
+    }
+
+    #[test]
+    fn delete_on_start() {
+        match Bets::new("bets.db") {
+            Err(why) => println!("{:?}", why),
+            _ => {}
+        }
     }
 }
