@@ -11,8 +11,9 @@ use serenity::{
     http::Http,
     model::{
         gateway::Ready,
+        guild::{Guild, GuildStatus},
         id::GuildId,
-        interactions::{application_command::ApplicationCommandOptionType, Interaction},
+        interactions::Interaction,
     },
     prelude::*,
 };
@@ -58,56 +59,7 @@ impl EventHandler for Handler {
         println!("{} is connected!", ready.user.name);
 
         for guild in ready.guilds {
-            println!("Registering slash commands for Guild {}", guild.id());
-            if let Err(why) =
-                GuildId::set_application_commands(&guild.id(), &ctx.http, |commands| {
-                    commands
-                        .create_application_command(|command| {
-                            command.name("make_account").description(
-                                "Create an account and displays it as a thread under this channel.",
-                            )
-                        })
-                        .create_application_command(|command| {
-                            command
-                                .name("bet")
-                                .description("Create a bet.")
-                                .create_option(|option| {
-                                    option
-                                        .name("desc")
-                                        .description("The description of the bet")
-                                        .kind(ApplicationCommandOptionType::String)
-                                        .required(true)
-                                })
-                                .create_option(|option| {
-                                    option
-                                        .name("options")
-                                        .description("The possible outcomes of the bet")
-                                        .kind(ApplicationCommandOptionType::String)
-                                        .required(true)
-                                })
-                        })
-                        .create_application_command(|command| {
-                            command
-                                .name("leaderboard")
-                                .description("Displays the leadeboard.")
-                                .create_option(|option| {
-                                    option
-                                        .name("permanent")
-                                        .description("To make a ever updating leaderboard")
-                                        .kind(ApplicationCommandOptionType::Boolean)
-                                        .required(false)
-                                })
-                        })
-                        .create_application_command(|command| {
-                            command
-                                .name("reset")
-                                .description("Abort every active bet and resets every account on the server to the starting sum")
-                        })
-                })
-                .await
-            {
-                println!("{}", why);
-            };
+            self.register_guild(&ctx.http, guild).await;
         }
     }
 
@@ -129,6 +81,11 @@ impl EventHandler for Handler {
             });
             self.is_loop_running.swap(true, Ordering::Relaxed);
         }
+    }
+
+    async fn guild_create(&self, ctx: Context, guild: Guild, _is_new: bool) {
+        self.register_guild(&ctx.http, GuildStatus::OnlineGuild(guild))
+            .await;
     }
 }
 

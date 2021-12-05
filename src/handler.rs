@@ -5,7 +5,9 @@ use std::sync::{atomic::AtomicBool, Arc};
 use itertools::Itertools;
 use serenity::http::CacheHttp;
 use serenity::model::channel::GuildChannel;
+use serenity::model::guild::{GuildStatus};
 use serenity::model::id::{MessageId, UserId};
+use serenity::model::interactions::application_command::ApplicationCommandOptionType;
 use serenity::model::interactions::message_component::ButtonStyle;
 use serenity::{
     http::Http,
@@ -76,6 +78,60 @@ impl Handler {
             front: Front::new("front.db").unwrap(),
             is_loop_running: AtomicBool::new(false),
         }
+    }
+
+    pub async fn register_guild(&self, http: &Http, guild: GuildStatus) {
+        println!("Registering slash commands for Guild {}", guild.id());
+        if let Err(why) =
+            GuildId::set_application_commands(&guild.id(), http, |commands| {
+                commands
+                    .create_application_command(|command| {
+                        command.name("make_account").description(
+                            "Create an account and displays it as a thread under this channel.",
+                        )
+                    })
+                    .create_application_command(|command| {
+                        command
+                            .name("bet")
+                            .description("Create a bet.")
+                            .create_option(|option| {
+                                option
+                                    .name("desc")
+                                    .description("The description of the bet")
+                                    .kind(ApplicationCommandOptionType::String)
+                                    .required(true)
+                            })
+                            .create_option(|option| {
+                                option
+                                    .name("options")
+                                    .description("The possible outcomes of the bet")
+                                    .kind(ApplicationCommandOptionType::String)
+                                    .required(true)
+                            })
+                    })
+                    .create_application_command(|command| {
+                        command
+                            .name("leaderboard")
+                            .description("Displays the leadeboard.")
+                            .create_option(|option| {
+                                option
+                                    .name("permanent")
+                                    .description("To make a ever updating leaderboard")
+                                    .kind(ApplicationCommandOptionType::Boolean)
+                                    .required(false)
+                            })
+                    })
+                    .create_application_command(|command| {
+                        command
+                            .name("reset")
+                            .description("Abort every active bet and resets every account on the server to the starting sum")
+                    })
+            })
+            .await
+        {
+            println!("Couldn't register slash commmands: {}", why);
+        };
+
     }
 
     pub async fn make_account(&self, ctx: Context, command: ApplicationCommandInteraction) {
