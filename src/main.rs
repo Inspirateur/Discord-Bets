@@ -55,12 +55,8 @@ impl EventHandler for Handler {
         }
     }
 
-    async fn ready(&self, ctx: Context, ready: Ready) {
+    async fn ready(&self, _ctx: Context, ready: Ready) {
         println!("{} is connected!", ready.user.name);
-
-        for guild in ready.guilds {
-            self.register_guild(&ctx.http, guild).await;
-        }
     }
 
     async fn cache_ready(&self, ctx: Context, _guilds: Vec<GuildId>) {
