@@ -21,3 +21,6 @@ which will remove the betting option and display win buttons to select the winni
 
 When the bet has been settled, the creator of the bet can then select the winning option to distributes the gain among the winners  
 ![bet is over](https://github.com/Inspirateur/Discord-Bets/blob/main/pictures/win.png)
+
+⚠️ *NOTICE: Due to thread renaming being slow, betting buttons might wrongly display `Interaction Failed.` sometimes  
+Unless there's a server side error, this is not true, it just means that it's taking time.*
