@@ -24,3 +24,11 @@ When the bet has been settled, the creator of the bet can then select the winnin
 
 ⚠️ *NOTICE: Due to thread renaming being slow, betting buttons might wrongly display `Interaction Failed.` sometimes  
 Unless there's a server side error, this is not true, it just means that it's taking time.*
+
+## How to run it
+- Either grab a build from the releases or build it yourself, and put the executable in a folder
+- go to https://discordapp.com/developers/applications/ create your app
+  - add a User Bot to it, its token must be stored in an environnement variable named "GOTOH_TOKEN" on the computer running the bot
+  - enable `SERVER MEMBERS INTENT` and `PRESENCE INTENT` in the bot tab  
+  - invite the bot with `https://discord.com/api/oauth2/authorize?client_id=CLIENT_ID&permissions=0&scope=bot` replace `CLIENT_ID` with the Client ID of your app
+- run the executable
