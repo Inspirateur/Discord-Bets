@@ -5,18 +5,17 @@ use std::sync::{atomic::AtomicBool, Arc};
 use itertools::Itertools;
 use serenity::http::CacheHttp;
 use serenity::model::channel::GuildChannel;
-use serenity::model::guild::{GuildStatus};
 use serenity::model::id::{MessageId, UserId};
-use serenity::model::interactions::application_command::ApplicationCommandOptionType;
-use serenity::model::interactions::message_component::ButtonStyle;
+use serenity::model::application::command::CommandOptionType;
+use serenity::model::application::component::ButtonStyle;
 use serenity::{
     http::Http,
     model::channel::Channel,
     model::channel::Message,
     model::id::GuildId,
-    model::interactions::{
+    model::application::interaction::{
         application_command::{
-            ApplicationCommandInteraction, ApplicationCommandInteractionDataOptionValue,
+            ApplicationCommandInteraction, CommandDataOptionValue,
         },
         message_component::MessageComponentInteraction,
         InteractionResponseType,
@@ -80,10 +79,10 @@ impl Handler {
         }
     }
 
-    pub async fn register_guild(&self, http: &Http, guild: GuildStatus) {
-        println!("Registering slash commands for Guild {}", guild.id());
+    pub async fn register_guild(&self, http: &Http, id: GuildId) {
+        println!("Registering slash commands for Guild {}", id);
         if let Err(why) =
-            GuildId::set_application_commands(&guild.id(), http, |commands| {
+            GuildId::set_application_commands(&id, http, |commands| {
                 commands
                     .create_application_command(|command| {
                         command.name("make_account").description(
@@ -98,14 +97,14 @@ impl Handler {
                                 option
                                     .name("desc")
                                     .description("The description of the bet")
-                                    .kind(ApplicationCommandOptionType::String)
+                                    .kind(CommandOptionType::String)
                                     .required(true)
                             })
                             .create_option(|option| {
                                 option
                                     .name("options")
                                     .description("The possible outcomes of the bet")
-                                    .kind(ApplicationCommandOptionType::String)
+                                    .kind(CommandOptionType::String)
                                     .required(true)
                             })
                     })
@@ -117,7 +116,7 @@ impl Handler {
                                 option
                                     .name("permanent")
                                     .description("To make a ever updating leaderboard")
-                                    .kind(ApplicationCommandOptionType::Boolean)
+                                    .kind(CommandOptionType::Boolean)
                                     .required(false)
                             })
                     })
@@ -242,7 +241,7 @@ impl Handler {
     fn bet_parse(
         command: &ApplicationCommandInteraction,
     ) -> Result<(String, Vec<String>), MismatchedQuotes> {
-        let desc = if let ApplicationCommandInteractionDataOptionValue::String(value) = command
+        let desc = if let CommandDataOptionValue::String(value) = command
             .data
             .options
             .get(0)
@@ -256,7 +255,7 @@ impl Handler {
             String::new()
         };
         let outcomes = split(
-            if let ApplicationCommandInteractionDataOptionValue::String(value) = command
+            if let CommandDataOptionValue::String(value) = command
                 .data
                 .options
                 .get(1)
@@ -367,7 +366,7 @@ impl Handler {
 
     pub async fn reset(&self, ctx: Context, command: ApplicationCommandInteraction) {
         if let Some(guild_id) = command.guild_id {
-            if let Some(guild) = guild_id.to_guild_cached(&ctx).await {
+            if let Some(guild) = guild_id.to_guild_cached(&ctx) {
                 if let Ok(perms) = guild.member_permissions(&ctx.http, command.user.id).await {
                     if perms.administrator() {
                         if let Err(why) = command
@@ -526,14 +525,14 @@ impl Handler {
         if let Some(server) = command.guild_id {
             if let Ok(Channel::Guild(channel)) = command.channel_id.to_channel(&ctx.http).await {
                 let user = command.user;
-                if let Some(mut message) = command.message.regular() {
+                let mut message = command.message; 
                     let button = command.data.custom_id.as_str();
                     if let Ok(i) = button.parse::<usize>() {
                         let percent = BET_OPTS[i];
                         self.bet_clicked(&ctx.http, server, channel, &mut message, user.id, percent).await;
                     } else if button == CANCEL || button == RESET {
                         // check for admin perm
-                        if let Some(guild) = server.to_guild_cached(&ctx).await {
+                        if let Some(guild) = server.to_guild_cached(&ctx) {
                             if let Ok(perms) = guild.member_permissions(&ctx.http, user.id).await {
                                 if perms.administrator() {
                                     if button == CANCEL {
@@ -660,7 +659,7 @@ impl Handler {
                             }
                         }
                     }
-                }
+                
             }
         }
     }

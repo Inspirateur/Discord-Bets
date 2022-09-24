@@ -1,5 +1,5 @@
 use serenity::builder::CreateComponents;
-use serenity::model::interactions::message_component::ButtonStyle;
+use serenity::model::application::component::ButtonStyle;
 pub const BET_OPTS: [u32; 3] = [10, 50, 100];
 pub const LOCK: &str = "lock";
 pub const ABORT: &str = "abort";

@@ -7,13 +7,13 @@ use front::is_readable;
 use handler::{passive_income, response, Handler};
 use serenity::{
     async_trait,
-    client::bridge::gateway::GatewayIntents,
     http::Http,
     model::{
         gateway::Ready,
-        guild::{Guild, GuildStatus},
+        guild::Guild,
         id::GuildId,
-        interactions::Interaction,
+        gateway::GatewayIntents,
+        application::interaction::Interaction,
     },
     prelude::*,
 };
@@ -80,8 +80,7 @@ impl EventHandler for Handler {
     }
 
     async fn guild_create(&self, ctx: Context, guild: Guild, _is_new: bool) {
-        self.register_guild(&ctx.http, GuildStatus::OnlineGuild(guild))
-            .await;
+        self.register_guild(&ctx.http, guild.id).await;
     }
 }
 
@@ -90,7 +89,7 @@ async fn main() {
     // Configure the client with your Discord bot token in the environment.
     let token = env::var("GOTOH_TOKEN").expect("Expected a token in the environment");
 
-    let http = Http::new_with_token(&token);
+    let http = Http::new(&token);
 
     // The Application Id is usually the Bot User Id.
     let bot_id = match http.get_current_application_info().await {
@@ -98,12 +97,11 @@ async fn main() {
         Err(why) => panic!("Could not access application info: {:?}", why),
     };
     // Build our client.
-    let mut client = Client::builder(token)
-        .intents(
-            GatewayIntents::non_privileged()
-                | GatewayIntents::GUILD_MEMBERS
-                | GatewayIntents::GUILD_PRESENCES,
-        )
+    let mut client = Client::builder(
+        token, GatewayIntents::non_privileged()
+        | GatewayIntents::GUILD_MEMBERS
+        | GatewayIntents::GUILD_PRESENCES
+    )
         .event_handler(Handler::new())
         .application_id(bot_id.into())
         .await
