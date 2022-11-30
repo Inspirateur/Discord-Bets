@@ -18,7 +18,7 @@ impl Display for Amount {
                 if *part == 1. {
                     write!(f, "All in")    
                 } else {
-                    write!(f, "{}%", part)
+                    write!(f, "{}%", part*100.)
                 }
             }
         }
