@@ -10,7 +10,11 @@ version = "*"
 features = ["bundled"]
 
 [dependencies]
+anyhow = "*"
 itertools = "*"
+serde = { version = "*", features = ["derive"]}
+confy = "*"
+lazy_static = "*"
 serenity = { version = "*", default-features = false, features = [
 	"client",
 	"gateway",

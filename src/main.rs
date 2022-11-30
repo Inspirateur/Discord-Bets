@@ -3,6 +3,9 @@ mod front;
 mod handler;
 mod handler_utils;
 mod utils;
+mod config;
+mod amount;
+use config::config as cfg;
 use front::is_readable;
 use handler::{passive_income, response, Handler};
 use serenity::{
@@ -22,10 +25,6 @@ use std::{
     sync::{atomic::Ordering, Arc},
     time::Duration,
 };
-pub const CURRENCY: &str = "💵";
-pub const STARTING_COINS: u32 = 300;
-pub const INCOME: u32 = 5;
-pub const INTERVAL: u64 = 3;
 
 #[async_trait]
 impl EventHandler for Handler {
@@ -70,7 +69,7 @@ impl EventHandler for Handler {
             let front1 = Arc::clone(&front);
             tokio::spawn(async move {
                 loop {
-                    tokio::time::sleep(Duration::from_secs(3600 * INTERVAL)).await;
+                    tokio::time::sleep(Duration::from_secs(3600 * cfg.interval)).await;
                     passive_income(Arc::clone(&ctx1), Arc::clone(&bets1), Arc::clone(&front1))
                         .await;
                 }

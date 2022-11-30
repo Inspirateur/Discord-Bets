@@ -1,19 +1,12 @@
 use serenity::builder::CreateComponents;
 use serenity::model::application::component::ButtonStyle;
-pub const BET_OPTS: [u32; 3] = [10, 50, 100];
+use crate::config::config;
 pub const LOCK: &str = "lock";
 pub const ABORT: &str = "abort";
 pub const WIN: &str = "win";
 pub const OPEN: &str = "open";
 pub const CANCEL: &str = "cancel";
 pub const RESET: &str = "reset";
-
-fn bet_opts_display(percent: u32) -> String {
-    match percent {
-        100 => "All in".to_string(),
-        _ => format!("{} %", percent),
-    }
-}
 
 pub fn bet_components<'a>(
     components: &'a mut CreateComponents,
@@ -49,12 +42,12 @@ pub fn option_components<'a>(
     }
     components.create_action_row(|action_row| {
         if status == OPEN {
-            for (i, percent) in BET_OPTS.into_iter().enumerate() {
+            for (i, amount) in config.bet_amounts.iter().enumerate() {
                 action_row.create_button(|button| {
                     button
                         .custom_id(i)
                         .style(ButtonStyle::Secondary)
-                        .label(bet_opts_display(percent))
+                        .label(amount)
                 });
             }
         } else if status == LOCK {

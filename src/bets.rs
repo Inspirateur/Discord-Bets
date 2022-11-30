@@ -1,4 +1,4 @@
-use crate::utils;
+use crate::{utils, amount::Amount};
 use rusqlite::{Connection, Result, Transaction};
 use std::collections::HashMap;
 
@@ -383,7 +383,7 @@ impl Bets {
         server: &str,
         option: &str,
         user: &str,
-        fraction: f32,
+        amount: Amount,
     ) -> Result<(AccountUpdate, BetStatus), BetError> {
         let mut conn = Connection::open(&self.db_path)?;
         // check if the bet is open
@@ -400,12 +400,23 @@ impl Bets {
             ));
         }
         // compute the amount to bet
-        assert!(0. <= fraction && fraction <= 1.);
         let balance = Bets::_balance(&conn, server, user)?;
-        let amount = f32::ceil(balance as f32 * fraction) as u32;
-        if amount == 0 {
-            return Err(BetError::NotEnoughMoney);
-        }
+        let amount = match amount {
+            Amount::FLAT(value) => {
+                if value > balance {
+                    return Err(BetError::NotEnoughMoney);
+                }
+                value
+            },
+            Amount::FRACTION(part) => {
+                assert!(0. <= part && part <= 1.);
+                let value = f32::ceil(balance as f32 * part) as u32;
+                if value == 0 {
+                    return Err(BetError::NotEnoughMoney);
+                }
+                value
+            }
+        };
         // bet
         let tx = conn.transaction()?;
         tx.execute(
@@ -661,7 +672,7 @@ impl Bets {
 
 #[cfg(test)]
 mod tests {
-    use crate::bets::Bets;
+    use crate::bets::*;
 
     #[test]
     fn create_db() {
@@ -685,13 +696,13 @@ mod tests {
                 ) {
                     println!("4 {:?}", why);
                 }
-                if let Err(why) = bets.bet_on("server", "opt1", "Roux", 0.5) {
+                if let Err(why) = bets.bet_on("server", "opt1", "Roux", Amount::FRACTION(0.5)) {
                     println!("5 {:?}", why);
                 }
-                if let Err(why) = bets.bet_on("server", "opt2", "Teo", 0.3) {
+                if let Err(why) = bets.bet_on("server", "opt2", "Teo", Amount::FRACTION(0.3)) {
                     println!("6 {:?}", why);
                 }
-                if let Err(why) = bets.bet_on("server", "opt2", "Manu", 0.4) {
+                if let Err(why) = bets.bet_on("server", "opt2", "Manu", Amount::FRACTION(0.4)) {
                     println!("7 {:?}", why);
                 }
                 if let Err(why) = bets.close_bet("server", "opt1") {

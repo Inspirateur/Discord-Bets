@@ -1,6 +1,7 @@
 use crate::bets::{BetError, Bets, AccountUpdate};
 use crate::front::{bet_stub, options_display, update_options, Front, FrontError};
-use crate::{CURRENCY, INCOME, INTERVAL, STARTING_COINS, handler_utils::*};
+use crate::{config::config, handler_utils::*};
+use crate::amount::Amount;
 use std::sync::{atomic::AtomicBool, Arc};
 use itertools::Itertools;
 use serenity::http::CacheHttp;
@@ -32,10 +33,10 @@ pub struct Handler {
 
 pub async fn passive_income(ctx: Arc<Context>, bets: Arc<Bets>, front: Arc<Front>) {
     // give INCOME to every one that has an account
-    match bets.income(INCOME) {
+    match bets.income(config.income) {
         Ok(acc_updates) => {
             front.update_account_threads(
-                &ctx.http, acc_updates, format!("Passive income: **+{{diff}}** {}", CURRENCY)
+                &ctx.http, acc_updates, format!("Passive income: **+{{diff}}** {}", config.currency)
             ).await;
         },
         Err(why) => println!("Couldn't distribute income: {:?}", why)
@@ -140,7 +141,7 @@ impl Handler {
             let user = format!("{}", command.user.id);
             let mut new_acc = false;
             // try to create the account
-            match self.bets.create_account(&guild, &user, STARTING_COINS) {
+            match self.bets.create_account(&guild, &user, config.starting_coins) {
                 Err(BetError::AlreadyExists) => {
                     response(
                         &ctx.http,
@@ -344,7 +345,7 @@ impl Handler {
                     // sort by balance+inbet first and balance to tie break
                     accounts.sort_by_key(|acc| (acc.balance+acc.in_bet, acc.balance));
                     accounts.reverse();
-                    let msg = format!("{}  ({} in bet)   user\n", CURRENCY, CURRENCY) 
+                    let msg = format!("{}  ({} in bet)   user\n", config.currency, config.currency) 
                     + &accounts.into_iter().take(10).map(|acc| 
                         format!("{}  ({})   <@{}>", acc.balance, acc.in_bet, acc.user)
                     ).join("\n") + "\n...";
@@ -472,12 +473,12 @@ impl Handler {
         }
     }
 
-    async fn bet_clicked(&self, http: &Http, server: GuildId, channel: GuildChannel, message: &mut Message, user_id: UserId, percent: u32) {
+    async fn bet_clicked(&self, http: &Http, server: GuildId, channel: GuildChannel, message: &mut Message, user_id: UserId, amount: Amount) {
         match self.bets.bet_on(
             &format!("{}", server),
             &format!("{}", message.id),
             &format!("{}", user_id),
-            percent as f32 / 100.0,
+            amount,
         ) {
             Ok((acc, bet_status)) => {
                 if let Err(why) =
@@ -491,7 +492,7 @@ impl Handler {
                         acc.clone(),
                         format!(
                             "You bet **{}** {} on:\n{}",
-                            -acc.diff, CURRENCY, message.content
+                            -acc.diff, config.currency, message.content
                         ),
                     ).await;
             }
@@ -500,7 +501,7 @@ impl Handler {
                     http, &server.0.to_string(), &user_id.0.to_string(),
                     format!(
                         "Your bet on:\n{}\nwas rejected because you don't have enough coins to bet.\nThe passive income gives you **{}** {} ever {} hours",
-                        message.content, INCOME, CURRENCY, INTERVAL
+                        message.content, config.income, config.currency, config.interval
                     )
                 ).await;
             },
@@ -528,8 +529,8 @@ impl Handler {
                 let mut message = command.message; 
                     let button = command.data.custom_id.as_str();
                     if let Ok(i) = button.parse::<usize>() {
-                        let percent = BET_OPTS[i];
-                        self.bet_clicked(&ctx.http, server, channel, &mut message, user.id, percent).await;
+                        let amount = config.bet_amounts[i];
+                        self.bet_clicked(&ctx.http, server, channel, &mut message, user.id, amount).await;
                     } else if button == CANCEL || button == RESET {
                         // check for admin perm
                         if let Some(guild) = server.to_guild_cached(&ctx) {
@@ -541,7 +542,7 @@ impl Handler {
                                         }
                                     } else if button == RESET {
                                         // reset every account on the server
-                                        if let Err(why) = self.bets.reset(&server.0.to_string(), STARTING_COINS) {
+                                        if let Err(why) = self.bets.reset(&server.0.to_string(), config.starting_coins) {
                                             println!("Couldn't reset accounts in db: {:?}", why);
                                         } else if let Err(why) = message.edit(&ctx.http, |msg| msg.components(|components| components).content("ALL ACCOUNTS ARE RESET")).await {
                                             println!("Couldn't edit the reset message: {}", why);
@@ -602,7 +603,7 @@ impl Handler {
                                                 account_updates,
                                                 format!(
                                                     "You got back **{{diff}}** {} because the bet was aborted",
-                                                    CURRENCY
+                                                    config.currency
                                                 ),
                                             ).await;
                                     }
@@ -619,7 +620,7 @@ impl Handler {
                                                 "{}\nhas won ! **{}** {} is shared between the winners.", 
                                                 content,
                                                 account_updates.iter().fold(0, |i, acc| i + acc.diff), 
-                                                CURRENCY
+                                                config.currency
                                             )
                                         ).await {
                                             println!("Couldn't reply to announce the winner: {}", why);
@@ -649,7 +650,7 @@ impl Handler {
                                                 account_updates,
                                                 format!(
                                                     "You won **{{diff}}** {} by betting on:\n{}",
-                                                    CURRENCY, content
+                                                    config.currency, content
                                                 ),
                                             ).await
                                     }

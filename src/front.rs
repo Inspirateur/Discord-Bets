@@ -1,6 +1,6 @@
 use crate::bets::{AccountUpdate, BetStatus, OptionStatus};
 use crate::utils::lrm;
-use crate::{CURRENCY, STARTING_COINS};
+use crate::config::config;
 use itertools;
 use rusqlite::{Connection, Result};
 use serde_json::{map::Map, value::Value};
@@ -75,7 +75,7 @@ fn option_display(desc: &str, percent: u32, odd: f32, sum: u32, people: u32) -> 
         percent,
         "1:".to_string() + &number_display(if odd.is_nan() { 1. } else { odd }),
         number_display(sum),
-        CURRENCY,
+        config.currency,
         number_display(people)
     )
 }
@@ -302,7 +302,7 @@ impl Front {
                     http,
                     format!(
                         "{}\nNew balance: **{}** {}",
-                        msg, acc_update.balance, CURRENCY
+                        msg, acc_update.balance, config.currency
                     )
                     .replace("{diff}", &acc_update.diff.to_string()),
                 )
@@ -314,7 +314,7 @@ impl Front {
                     edit.name(format!(
                         "{} {}",
                         number_display(acc_update.balance),
-                        CURRENCY
+                        config.currency
                     ))
                 })
                 .await?;
@@ -351,7 +351,7 @@ impl Front {
                     http,
                     format!(
                         "ACCOUNT RESET\nNew balance: **{}** {}",
-                        STARTING_COINS, CURRENCY
+                        config.starting_coins, config.currency
                     ),
                 )
                 .await?;
@@ -359,7 +359,7 @@ impl Front {
         for thread in threads {
             thread
                 .edit(http, |edit| {
-                    edit.name(format!("{} {}", number_display(STARTING_COINS), CURRENCY))
+                    edit.name(format!("{} {}", number_display(config.starting_coins), config.currency))
                 })
                 .await?;
         }
