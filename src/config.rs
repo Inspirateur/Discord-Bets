@@ -1,25 +1,20 @@
-use std::str::FromStr;
-use itertools::Itertools;
 use serde::{Serialize, Deserialize};
 use lazy_static::lazy_static;
 use confy;
-use crate::amount::Amount;
 
 #[derive(Serialize, Deserialize)]
 struct PartialConfig {
     pub currency: String,
     pub starting_coins: u32,
     pub income: u32,
-    pub interval: u64,
-    pub bet_amounts: Vec<String>
+    pub interval: u64
 }
 
 impl Default for PartialConfig {
     fn default() -> Self {
         Self { 
-            currency: "💵".to_string(), starting_coins: 300, 
-            income: 5, interval: 3, 
-            bet_amounts: vec!["10%".to_string(), "50%".to_string(), "100%".to_string()]
+            currency: "💵".to_string(), starting_coins: 350, 
+            income: 50, interval: 24
         }
     }
 }
@@ -28,8 +23,7 @@ pub struct Config {
     pub currency: String,
     pub starting_coins: u32,
     pub income: u32,
-    pub interval: u64,
-    pub bet_amounts: Vec<Amount>
+    pub interval: u64
 }
 
 impl Config {
@@ -38,10 +32,7 @@ impl Config {
             currency: part_cfg.currency,
             starting_coins: part_cfg.starting_coins,
             income: part_cfg.income,
-            interval: part_cfg.interval,
-            bet_amounts: part_cfg.bet_amounts.iter().map(
-                |str_amount| Amount::from_str(str_amount).unwrap()
-            ).collect_vec()
+            interval: part_cfg.interval
         }
     }
 }

@@ -1,5 +1,5 @@
 use crate::bets::{BetError, Bets, AccountUpdate};
-use crate::front::{bet_stub, options_display, update_options, Front, FrontError};
+use crate::front_utils::{bet_stub, options_display, update_options, Front, FrontError};
 use crate::{config::config, handler_utils::*};
 use crate::amount::Amount;
 use std::sync::{atomic::AtomicBool, Arc};
@@ -78,60 +78,6 @@ impl Handler {
             front: Front::new("front.db").unwrap(),
             is_loop_running: AtomicBool::new(false),
         }
-    }
-
-    pub async fn register_guild(&self, http: &Http, id: GuildId) {
-        println!("Registering slash commands for Guild {}", id);
-        if let Err(why) =
-            GuildId::set_application_commands(&id, http, |commands| {
-                commands
-                    .create_application_command(|command| {
-                        command.name("make_account").description(
-                            "Create an account and displays it as a thread under this channel.",
-                        )
-                    })
-                    .create_application_command(|command| {
-                        command
-                            .name("bet")
-                            .description("Create a bet.")
-                            .create_option(|option| {
-                                option
-                                    .name("desc")
-                                    .description("The description of the bet")
-                                    .kind(CommandOptionType::String)
-                                    .required(true)
-                            })
-                            .create_option(|option| {
-                                option
-                                    .name("options")
-                                    .description("The possible outcomes of the bet")
-                                    .kind(CommandOptionType::String)
-                                    .required(true)
-                            })
-                    })
-                    .create_application_command(|command| {
-                        command
-                            .name("leaderboard")
-                            .description("Displays the leadeboard.")
-                            .create_option(|option| {
-                                option
-                                    .name("permanent")
-                                    .description("To make a ever updating leaderboard")
-                                    .kind(CommandOptionType::Boolean)
-                                    .required(false)
-                            })
-                    })
-                    .create_application_command(|command| {
-                        command
-                            .name("reset")
-                            .description("Abort every active bet and resets every account on the server to the starting sum")
-                    })
-            })
-            .await
-        {
-            println!("Couldn't register slash commmands: {}", why);
-        };
-
     }
 
     pub async fn make_account(&self, ctx: Context, command: ApplicationCommandInteraction) {
@@ -235,105 +181,6 @@ impl Handler {
                     .await,
                     _ => {}
                 }
-            }
-        }
-    }
-
-    fn bet_parse(
-        command: &ApplicationCommandInteraction,
-    ) -> Result<(String, Vec<String>), MismatchedQuotes> {
-        let desc = if let CommandDataOptionValue::String(value) = command
-            .data
-            .options
-            .get(0)
-            .expect("Expected a description of the bet")
-            .resolved
-            .as_ref()
-            .expect("Expected a string")
-        {
-            value.clone()
-        } else {
-            String::new()
-        };
-        let outcomes = split(
-            if let CommandDataOptionValue::String(value) = command
-                .data
-                .options
-                .get(1)
-                .expect("Expected outcomes for the bet")
-                .resolved
-                .as_ref()
-                .expect("Expected a string")
-            {
-                value
-            } else {
-                ""
-            },
-        )?;
-        Ok((desc, outcomes))
-    }
-
-    pub async fn bet(&self, ctx: Context, command: ApplicationCommandInteraction) {
-        // TODO: silence notifications in bet message
-        if let Ok((desc, outcomes)) = Handler::bet_parse(&command) {
-            if outcomes.len() < 2 {
-                response(
-                    &ctx.http,
-                    &command,
-                    "You must define 2 outcomes or more to create a bet.",
-                )
-                .await;
-                return;
-            }
-            match command
-                .create_interaction_response(&ctx.http, |response| {
-                    response
-                        .kind(InteractionResponseType::ChannelMessageWithSource)
-                        .interaction_response_data(|message| {
-                            message
-                                .content(&desc)
-                                .components(|components| bet_components(components, OPEN))
-                        })
-                })
-                .await
-            {
-                Ok(_) => {
-                    if let Ok(bet_msg) = command.get_interaction_response(&ctx.http).await {
-                        let mut outcomes_msg = Vec::new();
-                        for outcome in options_display(&bet_stub(&outcomes)).iter() {
-                            if let Ok(outcome_msg) = command
-                                .channel_id
-                                .send_message(&ctx.http, |messsage| {
-                                    messsage.content(outcome).components(|components| {
-                                        option_components(components, OPEN)
-                                    })
-                                })
-                                .await
-                            {
-                                outcomes_msg.push(outcome_msg);
-                            };
-                        }
-                        if outcomes_msg.len() == outcomes.len() {
-                            // Everything is in order, we can create the bet
-                            match self.bets.create_bet(
-                                &format!("{}", command.guild_id.unwrap()),
-                                &format!("{}", bet_msg.id),
-                                &bet_msg.content,
-                                &outcomes_msg
-                                    .iter()
-                                    .map(|msg| format!("{}", msg.id))
-                                    .collect_vec(),
-                                &outcomes,
-                            ) {
-                                Err(why) => {
-                                    println!("Error while creating bet: {:?}", why)
-                                }
-                                _ => {}
-                            }
-                        }
-                    }
-                }
-                Err(why) => println!("{}", why),
             }
         }
     }

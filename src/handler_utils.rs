@@ -7,6 +7,7 @@ pub const WIN: &str = "win";
 pub const OPEN: &str = "open";
 pub const CANCEL: &str = "cancel";
 pub const RESET: &str = "reset";
+pub const BET: &str = "bet";
 
 pub fn bet_components<'a>(
     components: &'a mut CreateComponents,
@@ -33,7 +34,7 @@ pub fn bet_components<'a>(
     })
 }
 
-pub fn option_components<'a>(
+pub fn outcome_components<'a>(
     components: &'a mut CreateComponents,
     status: &str,
 ) -> &'a mut CreateComponents {
@@ -42,14 +43,12 @@ pub fn option_components<'a>(
     }
     components.create_action_row(|action_row| {
         if status == OPEN {
-            for (i, amount) in config.bet_amounts.iter().enumerate() {
-                action_row.create_button(|button| {
-                    button
-                        .custom_id(i)
-                        .style(ButtonStyle::Secondary)
-                        .label(amount)
-                });
-            }
+            action_row.create_button(|button| {
+                button
+                    .custom_id(BET)
+                    .style(ButtonStyle::Secondary)
+                    .label("Bet")
+            });
         } else if status == LOCK {
             action_row.create_button(|button| {
                 button
