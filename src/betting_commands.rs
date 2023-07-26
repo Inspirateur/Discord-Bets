@@ -4,7 +4,7 @@ use serenity::{
     prelude::*, 
     model::{
         application::{
-            component::{ButtonStyle, InputTextStyle}, 
+            component::{ButtonStyle, InputTextStyle, ActionRowComponent}, 
             interaction::{
                 InteractionResponseType, application_command::ApplicationCommandInteraction, 
                 message_component::MessageComponentInteraction, modal::ModalSubmitInteraction
@@ -15,7 +15,7 @@ use serenity::{
 };
 use serenity_utils::{BotUtil, MessageBuilder, Button};
 use shellwords::split;
-use crate::{betting_bot::BettingBot, config::config, serialize_utils::{BetOutcome, BetAction}, front_utils::shorten};
+use crate::{betting_bot::BettingBot, config::config, serialize_utils::{BetOutcome, BetAction}, front_utils::{shorten, outcomes_display, bet_stub}};
 
 impl BettingBot {
     fn bet_parse(
@@ -76,7 +76,8 @@ impl BettingBot {
         ).await?;
         let bet_uuid = bet_msg.id.0;
         self.bets.create_bet(bet_uuid, guild_id.0, command.user.id.0, desc, &outcomes)?;
-        for (i, outcome) in outcomes.iter().enumerate() {
+        let outcome_displays = outcomes_display(&bet_stub(&outcomes));
+        for (i, outcome) in outcome_displays.iter().enumerate() {
             let outcome_msg = ctx.http.send(bet_msg.channel_id, MessageBuilder::new(outcome).buttons(vec![
                 Button { 
                     custom_id: BetAction::BetClick(BetOutcome { bet_id: bet_uuid, outcome_id: i }).to_string(), 
@@ -114,29 +115,34 @@ impl BettingBot {
         bail!("couldn't get member");
     }
 
-    pub async fn lock_action(&self, ctx: Context, command: &MessageComponentInteraction, bet_id: u64) -> Result<()> {
-        let server_uuid = command.guild_id.ok_or(anyhow!("action triggered outside server"))?.0;
-        let bet_uuid = command.message.id.0;
+    pub async fn check_rights(&self, ctx: &Context, command: &MessageComponentInteraction, bet_id: u64) -> Result<()> {
         let user_uuid = command.user.id.0;
-        let info = self.bets.get_info(bet_uuid)?;
+        let info = self.bets.get_info(bet_id)?;
         if info.author != user_uuid && !self.is_admin(command).await? {
+            command.create_interaction_response(
+                &ctx.http, |response| 
+                response.kind(InteractionResponseType::ChannelMessageWithSource).interaction_response_data(
+                    |answer| answer.ephemeral(true)
+                    .content("Only the bet author or admins can perform this action")
+                )
+            ).await?;
             bail!("user is not bet author and not admin");
         }
-        self.bets.lock_bet(bet_uuid)?;
+        Ok(())
+    }
+    
+    pub async fn lock_action(&self, ctx: Context, command: &MessageComponentInteraction, bet_id: u64) -> Result<()> {
+        let server_uuid = command.guild_id.ok_or(anyhow!("action triggered outside server"))?.0;
+        self.check_rights(&ctx, command, bet_id).await?;
+        self.bets.lock_bet(bet_id)?;
 
         Ok(())
     }
 
     pub async fn abort_action(&self, ctx: Context, command: &MessageComponentInteraction, bet_id: u64) -> Result<()> {
         let server_uuid = command.guild_id.ok_or(anyhow!("action triggered outside server"))?.0;
-        let bet_uuid = command.message.id.0;
-        let user_uuid = command.user.id.0;
-        let info = self.bets.get_info(bet_uuid)?;
-        if info.author != user_uuid && !self.is_admin(command).await? {
-            bail!("user is not bet author and not admin");
-        }
-        self.bets.abort_bet(bet_uuid)?;
-        
+        self.check_rights(&ctx, command, bet_id).await?;
+        self.bets.abort_bet(bet_id)?;
         Ok(())
     }
 
@@ -149,12 +155,12 @@ impl BettingBot {
             &ctx.http, |response| 
             response.kind(InteractionResponseType::Modal).interaction_response_data(|modal|
                 modal.custom_id(BetAction::BetOrder(user_uuid).to_string())
-                    .title(format!("{} (balance: {} {})", shorten(&bet_info.desc, 50), balance, config.currency))
+                    .title(format!("{} ({} {})", shorten(&bet_info.desc, 20), balance, config.currency))
                     .components(|act_row| {
                         act_row.create_action_row(|field| field.create_input_text(|input| {
                             input.custom_id(bet_outcome.to_string())
                                 .style(InputTextStyle::Short)
-                                .label(format!("How much to bet on:\n{}", shorten(&command.message.content, 50)))
+                                .label(format!("How much to bet on:\n{}", shorten(&command.message.content, 30)))
                                 .placeholder("100")
                                 .required(true)
                         }))
@@ -164,16 +170,30 @@ impl BettingBot {
     }
 
     pub async fn bet_order_action(&self, ctx: Context, command: &ModalSubmitInteraction, user: u64) -> Result<()> {
+        if let ActionRowComponent::InputText(input) = &(&command.data.components[0]).components[0] {
+            let bet_outcome = BetOutcome::try_from(input.custom_id.as_ref())?;
+            let amount: u64 = input.value.parse()?;
+            let (acc_update, bet) = self.bets.bet_on(bet_outcome.bet_id, bet_outcome.outcome_id, user, amount)?;
+            command.create_interaction_response(
+                &ctx.http, |response| 
+                response.kind(InteractionResponseType::ChannelMessageWithSource).interaction_response_data(|answer|
+                answer.ephemeral(true).content(format!(
+                    "Succesfully bet {} {} on:\n{}\nnew balance: {} {}", 
+                    amount, config.currency, bet.outcomes[bet_outcome.outcome_id].desc, acc_update.balance, config.currency
+                )))
+            ).await?;
+            for (i, outcome) in outcomes_display(&bet).iter().enumerate() {
+                let msg_id = self.msg_map.get(BetOutcome { bet_id: bet_outcome.bet_id, outcome_id: i })?;
+                let mut msg = ctx.http.get_message(command.channel_id.0, msg_id).await?;
+                msg.edit(&ctx.http, |msg| msg.content(outcome)).await?;
+            }
+        }
         Ok(())
     }
 
     pub async fn resolve_action(&self, ctx: Context, command: &MessageComponentInteraction, bet_outcome: BetOutcome) -> Result<()> {
         let server_uuid = command.guild_id.ok_or(anyhow!("action triggered outside server"))?.0;
-        let user_uuid = command.user.id.0;
-        let info = self.bets.get_info(bet_outcome.bet_id)?;
-        if info.author != user_uuid && !self.is_admin(command).await? {
-            bail!("user is not bet author and not admin");
-        }
+        self.check_rights(&ctx, command, bet_outcome.bet_id).await?;
         self.bets.resolve(bet_outcome.bet_id, bet_outcome.outcome_id)?;
         Ok(())
     }
