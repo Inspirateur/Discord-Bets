@@ -1,7 +1,7 @@
 use std::sync::atomic::AtomicBool;
-use betting::{Bets, BetError};
+use betting::{Bets, BetError, AccountStatus};
 use serenity_utils::DBMap;
-use anyhow::{Result, Ok};
+use anyhow::{Result, Ok, anyhow};
 use crate::{serialize_utils::BetOutcome, config::config};
 
 pub struct BettingBot {
@@ -24,6 +24,16 @@ impl BettingBot {
             Err(BetError::NotFound) => {
                 self.bets.create_account(server, user, config.starting_coins as u64)?;
                 config.starting_coins as u64
+            },
+            res => res?
+        })
+    }
+
+    pub fn account_create(&self, server: u64, user: u64) -> Result<AccountStatus> {
+        Ok(match self.bets.account(server, user) {
+            Err(BetError::NotFound) => {
+                self.bets.create_account(server, user, config.starting_coins as u64)?;
+                AccountStatus { user, balance: config.starting_coins as u64, in_bet: 0 }
             },
             res => res?
         })

@@ -26,6 +26,7 @@ impl EventHandler for BettingBot {
                 // only answer if the bot has access to the channel
                 if is_writable(&ctx, command.channel_id).await {
                     if let Err(why) = match command_name.as_str() {
+                        "account" => self.account_command(ctx, command).await,
                         "bet" => self.bet_command(ctx, command).await,
                         "leaderboard" => self.leaderboard_command(ctx, command).await,
                         _ => Err(anyhow!("Unknown command")),
@@ -51,7 +52,7 @@ impl EventHandler for BettingBot {
                 warn!(target: "betting-bot", "MessageComponent: {} action: {:?}", command.data.custom_id, why);
             },
             Interaction::ModalSubmit(command) => if let Err(why) = match BetAction::try_from(command.data.custom_id.clone()) {
-                Ok(BetAction::BetOrder(user)) => self.bet_order_action(ctx, &command, user).await,
+                Ok(BetAction::BetOrder()) => self.bet_order_action(ctx, &command).await,
                 Err(why) => Err(why),
                 other => Err(anyhow!("Unhandled BetAction variant {:?}", other))
             } {

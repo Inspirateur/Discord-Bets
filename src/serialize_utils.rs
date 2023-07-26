@@ -13,7 +13,7 @@ pub enum BetAction {
     Abort(),
     BetClick(BetOutcome),
     Resolve(BetOutcome),
-    BetOrder(u64)
+    BetOrder()
 }
 
 impl ToString for BetAction {
@@ -23,7 +23,7 @@ impl ToString for BetAction {
             BetAction::BetClick(bet_outcome) => format!("{}-{}", BET_CLICK, bet_outcome.to_string()),
             BetAction::Resolve(bet_outcome) => format!("{}-{}", RESOLVE, bet_outcome.to_string()),
             BetAction::Abort() => format!("{}-", ABORT),
-            BetAction::BetOrder(user) => format!("{}-{}", BET_ORDER, user.to_string())
+            BetAction::BetOrder() => format!("{}-", BET_ORDER)
         }
     }
 }
@@ -40,7 +40,7 @@ impl TryFrom<String> for BetAction {
             BET_CLICK => BetAction::BetClick(BetOutcome::try_from(data)?),
             RESOLVE => BetAction::Resolve(BetOutcome::try_from(data)?),
             ABORT => BetAction::Abort(),
-            BET_ORDER => BetAction::BetOrder(data.parse()?),
+            BET_ORDER => BetAction::BetOrder(),
             _ => bail!("Bet action '{}' not recognized", action)
         })
     }

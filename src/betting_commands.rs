@@ -1,4 +1,5 @@
 use anyhow::{Result, bail, Ok, anyhow};
+use betting::Position;
 use itertools::Itertools;
 use serenity::{
     prelude::*, 
@@ -18,6 +19,16 @@ use shellwords::split;
 use crate::{betting_bot::BettingBot, config::config, serialize_utils::{BetOutcome, BetAction}, front_utils::{shorten, outcomes_display, bet_stub}};
 
 impl BettingBot {
+    pub async fn account_command(&self, ctx: Context, command: ApplicationCommandInteraction) -> Result<()> {
+        let server_uuid = command.guild_id.ok_or(anyhow!("command used outside a server"))?.0;
+        let user_uuid = command.user.id.0;
+        let account = self.account_create(server_uuid, user_uuid)?;
+        ctx.http.answer(&command, MessageBuilder::new(format!(
+            "Balance: {} {} | In bet: {} {}", account.balance, config.currency, account.in_bet, config.currency
+        )).ephemeral(true)).await?;
+        Ok(())
+    }
+
     fn bet_parse(
         command: &ApplicationCommandInteraction,
     ) -> Result<(String, Vec<String>)> {
@@ -57,7 +68,7 @@ impl BettingBot {
         ctx: Context,
         command: ApplicationCommandInteraction,
     ) -> Result<()> {
-        let guild_id = command.guild_id.ok_or(anyhow!("command used outside a server"))?;
+        let server_uuid = command.guild_id.ok_or(anyhow!("command used outside a server"))?;
         let (desc, outcomes) = Self::bet_parse(&command)?;
         if outcomes.len() < 2 {
             ctx.http.answer(
@@ -75,7 +86,7 @@ impl BettingBot {
             ])
         ).await?;
         let bet_uuid = bet_msg.id.0;
-        self.bets.create_bet(bet_uuid, guild_id.0, command.user.id.0, desc, &outcomes)?;
+        self.bets.create_bet(bet_uuid, server_uuid.0, command.user.id.0, desc, &outcomes)?;
         let outcome_displays = outcomes_display(&bet_stub(&outcomes));
         for (i, outcome) in outcome_displays.iter().enumerate() {
             let outcome_msg = ctx.http.send(bet_msg.channel_id, MessageBuilder::new(outcome).buttons(vec![
@@ -151,16 +162,33 @@ impl BettingBot {
         let user_uuid = command.user.id.0;
         let balance = self.balance_create(server_uuid, user_uuid)?;
         let bet_info = self.bets.get_info(bet_outcome.bet_id)?;
+        let previous_bet = match self.bets.position(user_uuid, bet_outcome.bet_id) {
+            Result::Ok(position) => {
+                if position.outcome != bet_outcome.outcome_id {
+                    command.create_interaction_response(&ctx.http, |response|
+                        response.kind(InteractionResponseType::ChannelMessageWithSource).interaction_response_data(|answer| 
+                            answer.ephemeral(true).content(format!("You put a bet on option #{} and can only bet on one option", position.outcome+1)))
+                        ).await?;
+                        bail!("user tried to bet on multiple option");        
+                }
+                position.amount
+            },
+            Err(betting::BetError::NotFound) => 0,
+            Err(err) => bail!(err)
+        };
         command.create_interaction_response(
             &ctx.http, |response| 
             response.kind(InteractionResponseType::Modal).interaction_response_data(|modal|
-                modal.custom_id(BetAction::BetOrder(user_uuid).to_string())
-                    .title(format!("{} ({} {})", shorten(&bet_info.desc, 20), balance, config.currency))
+                modal.custom_id(BetAction::BetOrder().to_string())
+                    .title(format!("[{} {}] {}", balance, config.currency, shorten(&bet_info.desc, 20)))
                     .components(|act_row| {
                         act_row.create_action_row(|field| field.create_input_text(|input| {
                             input.custom_id(bet_outcome.to_string())
                                 .style(InputTextStyle::Short)
-                                .label(format!("How much to bet on:\n{}", shorten(&command.message.content, 30)))
+                                .label(format!(
+                                    "[{} {}] How much to bet on: {}", previous_bet, config.currency, 
+                                    shorten(&command.message.content, 30)
+                                ))
                                 .placeholder("100")
                                 .required(true)
                         }))
@@ -169,7 +197,8 @@ impl BettingBot {
         Ok(())
     }
 
-    pub async fn bet_order_action(&self, ctx: Context, command: &ModalSubmitInteraction, user: u64) -> Result<()> {
+    pub async fn bet_order_action(&self, ctx: Context, command: &ModalSubmitInteraction) -> Result<()> {
+        let user = command.user.id.0;
         if let ActionRowComponent::InputText(input) = &(&command.data.components[0]).components[0] {
             let bet_outcome = BetOutcome::try_from(input.custom_id.as_ref())?;
             let amount: u64 = input.value.parse()?;
@@ -178,7 +207,7 @@ impl BettingBot {
                 &ctx.http, |response| 
                 response.kind(InteractionResponseType::ChannelMessageWithSource).interaction_response_data(|answer|
                 answer.ephemeral(true).content(format!(
-                    "Succesfully bet {} {} on:\n{}\nnew balance: {} {}", 
+                    "Succesfully bet {} {} on:\n> {}\nnew balance: {} {}", 
                     amount, config.currency, bet.outcomes[bet_outcome.outcome_id].desc, acc_update.balance, config.currency
                 )))
             ).await?;
@@ -203,6 +232,9 @@ impl BettingBot {
         if let Err(why) =
             GuildId::set_application_commands(&id, http, |commands| {
                 commands
+                    .create_application_command(|command| {
+                        command.name("account").description("Check how much you have in your account.")
+                    })
                     .create_application_command(|command| {
                         command
                             .name("bet")

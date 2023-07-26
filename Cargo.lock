@@ -111,9 +111,9 @@ checksum = "604178f6c5c21f02dc555784810edfb88d34ac2c73b2eae109655649ee73ce3d"
 
 [[package]]
 name = "betting"
-version = "0.2.1"
+version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9ff9a57ae9ad8d228c7b9d8a90447def6f3994831a782992160f7dae59fe571f"
+checksum = "b7e8415ab487642fa844bcd5a3c93136fa2fec7a3d0e3b836c39205bde15d96f"
 dependencies = [
  "anyhow",
  "itertools 0.10.5",
@@ -1078,9 +1078,9 @@ dependencies = [
 
 [[package]]
 name = "rustls-webpki"
-version = "0.101.1"
+version = "0.101.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "15f36a6828982f422756984e47912a7a51dcbc2a197aa791158f8ca61cd8204e"
+checksum = "513722fd73ad80a71f72b61009ea1b584bcfa1483ca93949c8f290298837fa59"
 dependencies = [
  "ring",
  "untrusted",
