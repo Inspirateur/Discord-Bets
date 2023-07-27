@@ -10,11 +10,11 @@ use serenity::{
         gateway::Ready,
         guild::Guild,
         id::GuildId,
-        application::interaction::Interaction,
+        application::interaction::{Interaction, InteractionResponseType}
     },
     prelude::*,
 };
-use serenity_utils::{is_writable, BotUtil, MessageBuilder};
+use serenity_utils::{is_writable, MessageBuilder, CommandUtil};
 use crate::{config::config, betting_bot::BettingBot, serialize_utils::BetAction};
 
 #[async_trait]
@@ -34,9 +34,9 @@ impl EventHandler for BettingBot {
                         warn!(target: "betting-bot", "\\{}: {:?}", command_name, why);
                     }
                 } else {
-                    if let Err(why) = ctx.http.answer(&command, MessageBuilder::new(
+                    if let Err(why) = command.response(&ctx.http, MessageBuilder::new(
                         "Sorry, I only answer to commands in the channels that I can read."
-                    )).await {
+                    ), InteractionResponseType::ChannelMessageWithSource).await {
                         warn!(target: "betting-bot", "\\{} in non writable channel: {:?}", command_name, why);
                     }
                 }

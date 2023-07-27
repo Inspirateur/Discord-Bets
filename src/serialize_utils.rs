@@ -46,7 +46,7 @@ impl TryFrom<String> for BetAction {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct BetOutcome {
     pub bet_id: u64,
     pub outcome_id: usize

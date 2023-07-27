@@ -1,7 +1,7 @@
 use std::sync::atomic::AtomicBool;
 use betting::{Bets, BetError, AccountStatus};
 use serenity_utils::DBMap;
-use anyhow::{Result, Ok, anyhow};
+use anyhow::{Result, Ok};
 use crate::{serialize_utils::BetOutcome, config::config};
 
 pub struct BettingBot {
