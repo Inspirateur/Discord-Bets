@@ -217,8 +217,8 @@ impl BettingBot {
                             input.custom_id(bet_outcome.to_string())
                                 .style(InputTextStyle::Short)
                                 .label(format!(
-                                    "[{} {}] How much to bet on: {}", previous_bet, config.currency, 
-                                    shorten(&command.message.content, 30)
+                                    "[{} {}] Bet on: {}", previous_bet, config.currency, 
+                                    shorten(&command.message.content, 20)
                                 ))
                                 .placeholder("100")
                                 .required(true)
