@@ -20,6 +20,8 @@ which will remove the betting option and display win buttons to select the winni
 When the bet has been settled, the creator of the bet can then select the winning option to distributes the gain among the winners  
 ![bet is over](https://github.com/Inspirateur/Discord-Bets/blob/main/pictures/win.png)
 
+There's also a /leaderboard command :)
+
 ## How to run it
 - Either grab a build from the releases or build it yourself, and put the executable in a folder
 - go to https://discordapp.com/developers/applications/ create your app
