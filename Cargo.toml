@@ -24,6 +24,7 @@ serenity = { version = "*", default-features = false, features = [
 	"unstable_discord_api",
 	"cache",
 ] }
+db-map = "*"
 serenity-utils = { git = "https://github.com/Inspirateur/serenity-utils.git" }
 shellwords = "*"
 tokio = { version = "*", features = ["macros", "rt-multi-thread"] }

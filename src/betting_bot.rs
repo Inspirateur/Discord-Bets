@@ -1,6 +1,6 @@
 use std::sync::atomic::AtomicBool;
 use betting::{Bets, BetError, AccountStatus};
-use serenity_utils::DBMap;
+use db_map::DBMap;
 use anyhow::{Result, Ok};
 use crate::{serialize_utils::BetOutcome, config::config};
 
