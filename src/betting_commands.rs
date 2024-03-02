@@ -2,10 +2,16 @@ use anyhow::{Result, bail, Ok, anyhow};
 use chrono::prelude::*;
 use itertools::Itertools;
 use serenity::{
-    all::{CommandInteraction, CommandOptionType, CreateActionRow, CreateButton, CreateCommand, CreateCommandOption, CreateInputText, CreateInteractionResponse, CreateModal, EditMessage}, 
+    all::{
+        CommandInteraction, CommandOptionType, CreateActionRow, 
+        CreateButton, CreateCommand, CreateCommandOption, 
+        CreateInputText, CreateInteractionResponse, CreateInteractionResponseMessage, 
+        CreateModal, EditMessage
+    }, 
     http::Http, model::{
         application::{
-            ActionRowComponent, ButtonStyle, ComponentInteraction, InputTextStyle, InteractionResponseFlags, ModalInteraction
+            ActionRowComponent, ButtonStyle, ComponentInteraction, 
+            InputTextStyle, InteractionResponseFlags, ModalInteraction
         }, 
         prelude::{CommandDataOptionValue, GuildId}
     }, prelude::*
@@ -22,7 +28,7 @@ impl BettingBot {
         command.response(
             &ctx.http, MessageBuilder::new(format!(
             "Balance: {} {} | In bet: {} {}", account.balance, config.currency, account.in_bet, config.currency
-            )).ephemeral(true), InteractionResponseFlags::default()
+            )).ephemeral(true), InteractionResponseFlags::EPHEMERAL
         ).await?;
         Ok(())
     }
@@ -127,7 +133,7 @@ impl BettingBot {
             command.response(
                 &ctx.http, 
                 MessageBuilder::new("Only the bet author or admins can perform this action").ephemeral(true),
-                InteractionResponseFlags::default()
+                InteractionResponseFlags::EPHEMERAL
             ).await?;
             bail!("user is not bet author and not admin");
         }
@@ -137,12 +143,13 @@ impl BettingBot {
     pub async fn lock_action(&self, ctx: Context, command: &ComponentInteraction, bet_id: u64) -> Result<()> {
         self.check_rights(&ctx, command, bet_id).await?;
         self.bets.lock_bet(bet_id)?;
-        command.response(
-            &ctx.http, 
-            MessageBuilder::new(command.message.content.clone()).buttons(vec![
-                Button { custom_id: BetAction::Abort().to_string(), label: "🚫 Abort".to_string(), style: ButtonStyle::Secondary }
-            ]), 
-            InteractionResponseFlags::default()
+        command.create_response(
+            &ctx.http,
+            CreateInteractionResponse::UpdateMessage(
+                CreateInteractionResponseMessage::new().components(vec![CreateActionRow::Buttons(vec![
+                    CreateButton::new(BetAction::Abort().to_string()).label("🚫 Abort".to_string()).style(ButtonStyle::Secondary)
+                ])])
+            )
         ).await?;
         for outcome_id in self.bets.outcomes_of_bet(bet_id)? {
             let outcome = BetOutcome { bet_id, outcome_id: outcome_id as usize };
@@ -162,10 +169,11 @@ impl BettingBot {
     pub async fn abort_action(&self, ctx: Context, command: &ComponentInteraction, bet_id: u64) -> Result<()> {
         self.check_rights(&ctx, command, bet_id).await?;
         self.bets.abort_bet(bet_id)?;
-        command.response(
+        command.create_response(
             &ctx.http, 
-            MessageBuilder::new("*Bet aborted, participants have been refunded.*"), 
-            InteractionResponseFlags::default()
+            CreateInteractionResponse::UpdateMessage(
+                CreateInteractionResponseMessage::new().content("*Bet aborted, participants have been refunded.*")
+            )
         ).await?;
         for outcome_id in self.bets.outcomes_of_bet(bet_id)? {
             let outcome = BetOutcome { bet_id, outcome_id: outcome_id as usize };
@@ -188,7 +196,7 @@ impl BettingBot {
                         MessageBuilder::new(
                             format!("You put a bet on option #{} and can only bet on one option", position.outcome+1)
                         ).ephemeral(true),
-                        InteractionResponseFlags::default()
+                        InteractionResponseFlags::EPHEMERAL
                     ).await?;
                     bail!("user tried to bet on multiple option");        
                 }
@@ -233,7 +241,7 @@ impl BettingBot {
                     "Succesfully bet {} {} (total {} {}) on:\n> {}\nnew balance: {} {}", 
                     amount, config.currency, total, config.currency, bet.outcomes[bet_outcome.outcome_id].desc, acc_update.balance, config.currency
                 )).ephemeral(true),
-                InteractionResponseFlags::default()
+                InteractionResponseFlags::EPHEMERAL
             ).await?;
             for (i, outcome) in outcomes_display(&bet).iter().enumerate() {
                 let msg_id = self.msg_map.get(BetOutcome { bet_id: bet_outcome.bet_id, outcome_id: i })?;
