@@ -2,3 +2,4 @@
 *.db
 **/config.toml
 **/token.*
+Cargo.lock

@@ -3,20 +3,16 @@ use chrono::prelude::*;
 use itertools::Itertools;
 use serenity::{
     all::{
-        CommandInteraction, CommandOptionType, CreateActionRow, 
-        CreateButton, CreateCommand, CreateCommandOption, 
-        CreateInputText, CreateInteractionResponse, CreateInteractionResponseMessage, 
-        CreateModal, EditMessage
+        CommandInteraction, CommandOptionType, CreateActionRow, CreateButton, CreateCommand, CreateCommandOption, CreateInputText, CreateInteractionResponse, CreateInteractionResponseMessage, CreateMessage, CreateModal, EditMessage
     }, 
     http::Http, model::{
         application::{
             ActionRowComponent, ButtonStyle, ComponentInteraction, 
-            InputTextStyle, InteractionResponseFlags, ModalInteraction
+            InputTextStyle, ModalInteraction
         }, 
         prelude::{CommandDataOptionValue, GuildId}
     }, prelude::*
 };
-use serenity_utils::{BotUtil, MessageBuilder, Button, CommandUtil};
 use shellwords::split;
 use crate::{betting_bot::BettingBot, config::config, serialize_utils::{BetOutcome, BetAction}, front_utils::{shorten, outcomes_display, bet_stub}};
 
@@ -25,10 +21,14 @@ impl BettingBot {
         let server_uuid = command.guild_id.ok_or(anyhow!("command used outside a server"))?.get();
         let user_uuid = command.user.id.get();
         let account: betting::AccountStatus = self.account_create(server_uuid, user_uuid)?;
-        command.response(
-            &ctx.http, MessageBuilder::new(format!(
-            "Balance: {} {} | In bet: {} {}", account.balance, config.currency, account.in_bet, config.currency
-            )).ephemeral(true), InteractionResponseFlags::EPHEMERAL
+        command.create_response(
+            &ctx.http, CreateInteractionResponse::Message(
+                CreateInteractionResponseMessage::new()
+                    .content(format!("Balance: {} {} | In bet: {} {}", 
+                        account.balance, config.currency, account.in_bet, config.currency
+                    ))
+                    .ephemeral(true)
+            )
         ).await?;
         Ok(())
     }
@@ -69,32 +69,39 @@ impl BettingBot {
         let server_uuid = command.guild_id.ok_or(anyhow!("command used outside a server"))?;
         let (desc, outcomes) = Self::bet_parse(&command)?;
         if outcomes.len() < 2 {
-            command.response(
+            command.create_response(
                 &ctx.http,
-                MessageBuilder::new("You must define 2 outcomes or more to create a bet."),
-                InteractionResponseFlags::default()
+                CreateInteractionResponse::Message(
+                    CreateInteractionResponseMessage::new()
+                    .content("You must define 2 outcomes or more to create a bet.")
+                ),
             )
             .await?;
             bail!("Less than 2 ouctomes");
         }
-        let bet_msg = command.response(
+        command.create_response(
             &ctx.http, 
-            MessageBuilder::new(&desc).buttons(vec![
-                Button { custom_id: BetAction::Lock().to_string(), label: "🔒 Lock".to_string(), style: ButtonStyle::Secondary },
-                Button { custom_id: BetAction::Abort().to_string(), label: "🚫 Abort".to_string(), style: ButtonStyle::Secondary }
-            ]),
-            InteractionResponseFlags::default()
-        ).await?;
+            CreateInteractionResponse::Message(
+                CreateInteractionResponseMessage::new()
+                .content(&desc)
+                .components(vec![CreateActionRow::Buttons(vec![
+                    CreateButton::new(BetAction::Lock).label("🔒 Lock").style(ButtonStyle::Secondary),
+                    CreateButton::new(BetAction::Abort).label("🚫 Abort").style(ButtonStyle::Secondary),
+                ])])
+        )).await?;
+        let bet_msg = command.get_response(&ctx.http).await?;
         let bet_uuid = bet_msg.id.get();
         self.bets.create_bet(bet_uuid, server_uuid.get(), command.user.id.get(), desc, &outcomes)?;
         let outcome_displays = outcomes_display(&bet_stub(&outcomes));
         for (i, outcome) in outcome_displays.iter().enumerate() {
-            let outcome_msg = ctx.http.send(bet_msg.channel_id, MessageBuilder::new(outcome).buttons(vec![
-                Button { 
-                    custom_id: BetAction::BetClick(BetOutcome { bet_id: bet_uuid, outcome_id: i }).to_string(), 
-                    label: format!("{} Bet", config.currency), style: ButtonStyle::Primary 
-                }
-            ])).await?;
+            let outcome_msg = command.channel_id.send_message(&ctx.http, 
+                CreateMessage::new().content(outcome)
+                .components(vec![CreateActionRow::Buttons(vec![
+                    CreateButton::new(BetAction::BetClick(BetOutcome { bet_id: bet_uuid, outcome_id: i }))
+                        .label(format!("{} Bet", config.currency))
+                        .style(ButtonStyle::Primary)
+                ])])
+            ).await?;
             self.msg_map.insert(BetOutcome {bet_id: bet_uuid, outcome_id: i}, outcome_msg.id.get())?;
         }
         Ok(())
@@ -114,7 +121,9 @@ impl BettingBot {
         + &accounts.into_iter().take(10).map(|acc| 
             format!("{}  ({})   <@{}>", acc.balance, acc.in_bet, acc.user)
         ).join("\n") + "\n...";
-        command.response(&ctx.http, MessageBuilder::new(msg), InteractionResponseFlags::default()).await?;
+        command.create_response(&ctx.http, 
+            CreateInteractionResponse::Message(CreateInteractionResponseMessage::new().content(msg))
+        ).await?;
         Ok(())
     }
 
@@ -130,10 +139,13 @@ impl BettingBot {
         let user_uuid = command.user.id.get();
         let info = self.bets.get_info(bet_id)?;
         if info.author != user_uuid && !self.is_admin(command).await? {
-            command.response(
+            command.create_response(
                 &ctx.http, 
-                MessageBuilder::new("Only the bet author or admins can perform this action").ephemeral(true),
-                InteractionResponseFlags::EPHEMERAL
+                CreateInteractionResponse::Message(
+                    CreateInteractionResponseMessage::new()
+                        .content("Only the bet author or admins can perform this action")
+                        .ephemeral(true)
+                    )
             ).await?;
             bail!("user is not bet author and not admin");
         }
@@ -147,7 +159,7 @@ impl BettingBot {
             &ctx.http,
             CreateInteractionResponse::UpdateMessage(
                 CreateInteractionResponseMessage::new().components(vec![CreateActionRow::Buttons(vec![
-                    CreateButton::new(BetAction::Abort().to_string()).label("🚫 Abort".to_string()).style(ButtonStyle::Secondary)
+                    CreateButton::new(BetAction::Abort).label("🚫 Abort").style(ButtonStyle::Secondary)
                 ])])
             )
         ).await?;
@@ -157,8 +169,8 @@ impl BettingBot {
             let mut message = ctx.http.get_message(command.channel_id, msg_id.into()).await?;
             message.edit(&ctx.http, 
                 EditMessage::new().components(vec![CreateActionRow::Buttons(vec![
-                    CreateButton::new(BetAction::Resolve(outcome).to_string())
-                        .label("🏆 Resolve".to_string())
+                    CreateButton::new(BetAction::Resolve(outcome))
+                        .label("🏆 Resolve")
                         .style(ButtonStyle::Secondary)
                 ])])
             ).await?;
@@ -191,12 +203,14 @@ impl BettingBot {
         let previous_bet = match self.bets.position(user_uuid, bet_outcome.bet_id) {
             Result::Ok(position) => {
                 if position.outcome != bet_outcome.outcome_id {
-                    command.response(
+                    command.create_response(
                         &ctx.http, 
-                        MessageBuilder::new(
-                            format!("You put a bet on option #{} and can only bet on one option", position.outcome+1)
-                        ).ephemeral(true),
-                        InteractionResponseFlags::EPHEMERAL
+                CreateInteractionResponse::Message(
+                            CreateInteractionResponseMessage::new().content(
+                                format!("You put a bet on option #{} and can only bet on one option", position.outcome+1)
+                            )
+                            .ephemeral(true)
+                        )
                     ).await?;
                     bail!("user tried to bet on multiple option");        
                 }
@@ -209,7 +223,7 @@ impl BettingBot {
             &ctx.http, 
             CreateInteractionResponse::Modal(
                 CreateModal::new(
-                    BetAction::BetOrder().to_string(), 
+                    BetAction::BetOrder, 
                     format!("[{} {}] {}", balance, config.currency, shorten(&bet_info.desc, 20))
                 ).components(vec![
                     CreateActionRow::InputText(
@@ -235,13 +249,16 @@ impl BettingBot {
             let (acc_update, bet) = self.bets.bet_on(bet_outcome.bet_id, bet_outcome.outcome_id, user, amount)?;
             let total: u64 = bet.outcomes[bet_outcome.outcome_id].wagers
                 .iter().filter(|(u, _)| *u == user).map(|(_, a)| a).sum();
-            command.response(
+            command.create_response(
                 &ctx.http, 
-                MessageBuilder::new(format!(
-                    "Succesfully bet {} {} (total {} {}) on:\n> {}\nnew balance: {} {}", 
-                    amount, config.currency, total, config.currency, bet.outcomes[bet_outcome.outcome_id].desc, acc_update.balance, config.currency
-                )).ephemeral(true),
-                InteractionResponseFlags::EPHEMERAL
+                CreateInteractionResponse::Message(
+                    CreateInteractionResponseMessage::new()
+                        .content(format!(
+                            "Succesfully bet {} {} (total {} {}) on:\n> {}\nnew balance: {} {}", 
+                            amount, config.currency, total, config.currency, bet.outcomes[bet_outcome.outcome_id].desc, acc_update.balance, config.currency
+                        ))
+                        .ephemeral(true)
+                )
             ).await?;
             for (i, outcome) in outcomes_display(&bet).iter().enumerate() {
                 let msg_id = self.msg_map.get(BetOutcome { bet_id: bet_outcome.bet_id, outcome_id: i })?;
@@ -256,10 +273,12 @@ impl BettingBot {
         self.check_rights(&ctx, command, bet_outcome.bet_id).await?;
         self.bets.resolve(bet_outcome.bet_id, bet_outcome.outcome_id)?;
 
-        command.response(
+        command.create_response(
             &ctx.http, 
-            MessageBuilder::new(format!("🏆 Winner\n{}", command.message.content.clone())), 
-            InteractionResponseFlags::default()
+            CreateInteractionResponse::Message(
+                CreateInteractionResponseMessage::new()
+                    .content(format!("🏆 Winner\n{}", command.message.content.clone()))
+            )
         ).await?;
 
         let mut bet_msg = ctx.http.get_message(command.channel_id, bet_outcome.bet_id.into()).await?;

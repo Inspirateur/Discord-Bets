@@ -1,3 +1,5 @@
+use std::fmt::Display;
+
 use anyhow::{anyhow, bail};
 use itertools::Itertools;
 use rusqlite::{ToSql, types::{ToSqlOutput, Value}};
@@ -9,22 +11,28 @@ pub const BET_ORDER: &str = "bet_order";
 
 #[derive(Debug)]
 pub enum BetAction {
-    Lock(),
-    Abort(),
+    Lock,
+    Abort,
     BetClick(BetOutcome),
     Resolve(BetOutcome),
-    BetOrder()
+    BetOrder
 }
 
-impl ToString for BetAction {
-    fn to_string(&self) -> String {
-        match self {
-            BetAction::Lock() => format!("{}-", LOCK),
+impl Display for BetAction {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", match self {
+            BetAction::Lock => format!("{}-", LOCK),
             BetAction::BetClick(bet_outcome) => format!("{}-{}", BET_CLICK, bet_outcome.to_string()),
             BetAction::Resolve(bet_outcome) => format!("{}-{}", RESOLVE, bet_outcome.to_string()),
-            BetAction::Abort() => format!("{}-", ABORT),
-            BetAction::BetOrder() => format!("{}-", BET_ORDER)
-        }
+            BetAction::Abort => format!("{}-", ABORT),
+            BetAction::BetOrder => format!("{}-", BET_ORDER)
+        })
+    }
+}
+
+impl From<BetAction> for String {
+    fn from(value: BetAction) -> Self {
+        value.to_string()
     }
 }
 
@@ -36,11 +44,11 @@ impl TryFrom<String> for BetAction {
             anyhow!("'{}' is not a BetAction. Expecting <action>-<data>", value)
         )?;
         Ok(match action {
-            LOCK => BetAction::Lock(),
+            LOCK => BetAction::Lock,
             BET_CLICK => BetAction::BetClick(BetOutcome::try_from(data)?),
             RESOLVE => BetAction::Resolve(BetOutcome::try_from(data)?),
-            ABORT => BetAction::Abort(),
-            BET_ORDER => BetAction::BetOrder(),
+            ABORT => BetAction::Abort,
+            BET_ORDER => BetAction::BetOrder,
             _ => bail!("Bet action '{}' not recognized", action)
         })
     }
