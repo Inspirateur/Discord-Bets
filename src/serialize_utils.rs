@@ -22,8 +22,8 @@ impl Display for BetAction {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", match self {
             BetAction::Lock => format!("{}-", LOCK),
-            BetAction::BetClick(bet_outcome) => format!("{}-{}", BET_CLICK, bet_outcome.to_string()),
-            BetAction::Resolve(bet_outcome) => format!("{}-{}", RESOLVE, bet_outcome.to_string()),
+            BetAction::BetClick(bet_outcome) => format!("{}-{}", BET_CLICK, bet_outcome),
+            BetAction::Resolve(bet_outcome) => format!("{}-{}", RESOLVE, bet_outcome),
             BetAction::Abort => format!("{}-", ABORT),
             BetAction::BetOrder => format!("{}-", BET_ORDER)
         })
@@ -60,9 +60,9 @@ pub struct BetOutcome {
     pub outcome_id: usize
 }
 
-impl ToString for BetOutcome {
-    fn to_string(&self) -> String {
-        format!("{}-{}", self.bet_id, self.outcome_id)
+impl Display for BetOutcome {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}-{}", self.bet_id, self.outcome_id)
     }
 }
 
