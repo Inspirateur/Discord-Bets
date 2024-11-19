@@ -1,5 +1,5 @@
 /target
 *.db
 **/config.toml
-**/token.*
+token.txt
 Cargo.lock
