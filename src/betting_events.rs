@@ -1,15 +1,11 @@
-use std::{
-    sync::{atomic::Ordering, Arc},
-    time::Duration,
-};
 use anyhow::anyhow;
-use log::{warn, info};
+use log::warn;
 use serenity::{
     all::{CreateInteractionResponse, CreateInteractionResponseMessage}, async_trait, model::{
         application::Interaction, gateway::Ready, guild::Guild, id::GuildId
     }, prelude::*
 };
-use crate::{config::config, betting_bot::BettingBot, serialize_utils::BetAction};
+use crate::{betting_bot::BettingBot, serialize_utils::BetAction};
 
 #[async_trait]
 impl EventHandler for BettingBot {
@@ -26,7 +22,7 @@ impl EventHandler for BettingBot {
                         "leaderboard" => self.leaderboard_command(ctx, command).await,
                         _ => Err(anyhow!("Unknown command")),
                     } {
-                        warn!(target: "betting-bot", "\\{}: {:?}", command_name, why);
+                        warn!(target: "betting-bot", "\\{}: {}", command_name, why);
                     }
                 } else {
                     if let Err(why) = command.create_response(
@@ -36,7 +32,7 @@ impl EventHandler for BettingBot {
                                 .ephemeral(true)
                         )).await 
                     {
-                        warn!(target: "betting-bot", "\\{} in non writable channel: {:?}", command_name, why);
+                        warn!(target: "betting-bot", "\\{} in non writable channel: {}", command_name, why);
                     }
                 }
             }
@@ -48,14 +44,14 @@ impl EventHandler for BettingBot {
                 Err(why) => Err(why),
                 other => Err(anyhow!("Unhandled BetAction variant {:?}", other))
             } {
-                warn!(target: "betting-bot", "Component: {} action: {:?}", command.data.custom_id, why);
+                warn!(target: "betting-bot", "Component '{}': {}", command.data.custom_id, why);
             },
             Interaction::Modal(command) => if let Err(why) = match BetAction::try_from(command.data.custom_id.clone()) {
                 Ok(BetAction::BetOrder) => self.bet_order_action(ctx, &command).await,
                 Err(why) => Err(why),
                 other => Err(anyhow!("Unhandled BetAction variant {:?}", other))
             } {
-                warn!(target: "betting-bot", "Modal: {} action: {:?}", command.data.custom_id, why);
+                warn!(target: "betting-bot", "Modal '{}': {}", command.data.custom_id, why);
             }
             _ => {}
         }
@@ -67,21 +63,6 @@ impl EventHandler for BettingBot {
 
     async fn cache_ready(&self, _ctx: Context, _guilds: Vec<GuildId>) {
         println!("Cache built successfully!");
-        let bets = Arc::new(self.bets.clone());
-        if !self.is_loop_running.load(Ordering::Relaxed) {
-            let bets1 = Arc::clone(&bets);
-            tokio::spawn(async move {
-                loop {
-                    tokio::time::sleep(Duration::from_secs(3600 * config.interval)).await;
-                    if let Err(why) = bets1.global_income(config.income as u64) {
-                        warn!(target: "betting-bot", "couldn't distribute global income: {}", why)
-                    } else {
-                        info!(target: "betting-bot", "distributed global income of {}", config.income)
-                    }
-                }
-            });
-            self.is_loop_running.swap(true, Ordering::Relaxed);
-        }
     }
 
     async fn guild_create(&self, ctx: Context, guild: Guild, _is_new: Option<bool>) {

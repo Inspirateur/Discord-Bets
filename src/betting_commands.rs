@@ -20,7 +20,8 @@ impl BettingBot {
     pub async fn account_command(&self, ctx: Context, command: CommandInteraction) -> Result<()> {
         let server_uuid = command.guild_id.ok_or(anyhow!("command used outside a server"))?.get();
         let user_uuid = command.user.id.get();
-        let account: betting::AccountStatus = self.account_create(server_uuid, user_uuid)?;
+        self.bets.create_account(server_uuid, user_uuid, config.starting_coins as u64)?;
+        let account: betting::AccountStatus = self.bets.account(server_uuid, user_uuid)?;
         command.create_response(
             &ctx.http, CreateInteractionResponse::Message(
                 CreateInteractionResponseMessage::new()
@@ -83,7 +84,7 @@ impl BettingBot {
             &ctx.http, 
             CreateInteractionResponse::Message(
                 CreateInteractionResponseMessage::new()
-                .content(&desc)
+                .content("## ".to_string()+desc.trim().trim_start_matches("#").trim_start())
                 .components(vec![CreateActionRow::Buttons(vec![
                     CreateButton::new(BetAction::Lock).label("🔒 Lock").style(ButtonStyle::Secondary),
                     CreateButton::new(BetAction::Abort).label("🚫 Abort").style(ButtonStyle::Secondary),
@@ -91,7 +92,10 @@ impl BettingBot {
         )).await?;
         let bet_msg = command.get_response(&ctx.http).await?;
         let bet_uuid = bet_msg.id.get();
-        self.bets.create_bet(bet_uuid, server_uuid.get(), command.user.id.get(), desc, &outcomes)?;
+        let server_uuid = server_uuid.get();
+        let author_uuid = command.user.id.get();
+        self.bets.create_account(server_uuid, author_uuid, config.starting_coins as u64)?;
+        self.bets.create_bet(bet_uuid, server_uuid, author_uuid, desc, &outcomes)?;
         let outcome_displays = outcomes_display(&bet_stub(&outcomes));
         for (i, outcome) in outcome_displays.iter().enumerate() {
             let outcome_msg = command.channel_id.send_message(&ctx.http, 
@@ -137,7 +141,7 @@ impl BettingBot {
 
     pub async fn check_rights(&self, ctx: &Context, command: &ComponentInteraction, bet_id: u64) -> Result<()> {
         let user_uuid = command.user.id.get();
-        let info = self.bets.get_info(bet_id)?;
+        let info = self.bets.bet_info(bet_id)?;
         if info.author != user_uuid && !self.is_admin(command).await? {
             command.create_response(
                 &ctx.http, 
@@ -198,8 +202,10 @@ impl BettingBot {
     pub async fn bet_click_action(&self, ctx: Context, command: &ComponentInteraction, bet_outcome: BetOutcome) -> Result<()> {
         let server_uuid = command.guild_id.ok_or(anyhow!("action triggered outside server"))?.get();
         let user_uuid = command.user.id.get();
-        let balance = self.balance_create(server_uuid, user_uuid)?;
-        let bet_info = self.bets.get_info(bet_outcome.bet_id)?;
+        self.bets.create_account(server_uuid, user_uuid, config.starting_coins as u64)?;
+        let balance = self.bets.balance(server_uuid, user_uuid)?;
+        let bet_info = self.bets.bet_info(bet_outcome.bet_id)?;
+        let outcome_text = shorten(&command.message.content.trim_start_matches("## >"), 20);
         let previous_bet = match self.bets.position(user_uuid, bet_outcome.bet_id) {
             Result::Ok(position) => {
                 if position.outcome != bet_outcome.outcome_id {
@@ -229,10 +235,7 @@ impl BettingBot {
                     CreateActionRow::InputText(
                         CreateInputText::new(
                             InputTextStyle::Short, 
-                            format!(
-                                "[{} {}] Bet on: {}", previous_bet, config.currency, 
-                                shorten(&command.message.content, 20)
-                            ),
+                            format!("[{} {}] Bet on: {}", previous_bet, config.currency, outcome_text),
                             bet_outcome.to_string()
                         ).placeholder("100").required(true)
                     )
@@ -254,7 +257,7 @@ impl BettingBot {
                 CreateInteractionResponse::Message(
                     CreateInteractionResponseMessage::new()
                         .content(format!(
-                            "Succesfully bet {} {} (total {} {}) on:\n> {}\nnew balance: {} {}", 
+                            "Succesfully bet {} {} (total {} {}) on:\n## > {}\nnew balance: {} {}", 
                             amount, config.currency, total, config.currency, bet.outcomes[bet_outcome.outcome_id].desc, acc_update.balance, config.currency
                         ))
                         .ephemeral(true)
@@ -270,14 +273,21 @@ impl BettingBot {
     }
 
     pub async fn resolve_action(&self, ctx: Context, command: &ComponentInteraction, bet_outcome: BetOutcome) -> Result<()> {
+        let Some(guild_id) = command.guild_id else {
+            bail!("Couldn't find the guild id");
+        };
         self.check_rights(&ctx, command, bet_outcome.bet_id).await?;
         self.bets.resolve(bet_outcome.bet_id, bet_outcome.outcome_id)?;
-
+        // Everyone wins a little activity bonus
+        self.bets.income(guild_id.get(), config.income as u64)?;
         command.create_response(
             &ctx.http, 
             CreateInteractionResponse::Message(
                 CreateInteractionResponseMessage::new()
-                    .content(format!("🏆 Winner\n{}", command.message.content.clone()))
+                    .content(format!(
+                        "## Bet resolved as\n{}\n-# everyone also wins {}`{}` for activity bonus !", 
+                        command.message.content.clone(), config.income, config.currency
+                    ))
             )
         ).await?;
 

@@ -48,8 +48,8 @@ pub fn bet_stub(outcomes_desc: &Vec<String>) -> Bet {
 
 fn outcome_display(desc: &str, percent: u64, odd: f32, sum: u32, people: u32) -> String {
     format!(
-        "> {}\n` {: >3}%  | {: >6} 🏆  {: >4} {}  {: >4} 👥 `",
-        desc,
+        "## > {}\n` {: >3}%  | {: >6} 🏆  {: >4} {}  {: >4} 👥 `",
+        desc.trim().trim_start_matches("#"),
         percent,
         "1:".to_string() + &number_display(if odd.is_nan() { 1. } else { odd }),
         number_display(sum),
