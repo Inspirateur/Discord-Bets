@@ -277,7 +277,8 @@ impl BettingBot {
             bail!("Couldn't find the guild id");
         };
         self.check_rights(&ctx, command, bet_outcome.bet_id).await?;
-        self.bets.resolve(bet_outcome.bet_id, bet_outcome.outcome_id)?;
+        let account_diffs = self.bets.resolve(bet_outcome.bet_id, bet_outcome.outcome_id)?;
+        let total = account_diffs.into_iter().fold(0, |sum, acc| sum+acc.diff);
         // Everyone wins a little activity bonus
         self.bets.income(guild_id.get(), config.income as u64)?;
         command.create_response(
@@ -285,8 +286,8 @@ impl BettingBot {
             CreateInteractionResponse::Message(
                 CreateInteractionResponseMessage::new()
                     .content(format!(
-                        "## Bet resolved as\n{}\n-# everyone also wins {}`{}` for activity bonus !", 
-                        command.message.content.clone(), config.income, config.currency
+                        "## Bet resolved as\n{}\n{} {} is shared between the winners.\n-# everyone also wins {}`{}` for activity bonus !", 
+                        command.message.content.clone(), total, config.currency, config.income, config.currency
                     ))
             )
         ).await?;
